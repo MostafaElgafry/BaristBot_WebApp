@@ -7,8 +7,15 @@ import time
 from dataclasses import dataclass
 from typing import Optional
 import logging
+import traceback
 
+# Configure logging with more detail for debugging
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
 
 
 class SerialNotConnectedError(Exception):
@@ -59,46 +66,93 @@ class RobotControlBoardSerialClient:
 
     def connect(self) -> None:
         """Open the serial port."""
+        logger.debug(f"[DEBUG] connect() called - attempting to connect to {self._port}")
+        logger.debug(f"[DEBUG] Current state: _serial={self._serial}, _connected={self._connected}")
+
         try:
             import serial
+            import serial.tools.list_ports
+
+            # List available ports for debugging
+            available_ports = list(serial.tools.list_ports.comports())
+            logger.debug(f"[DEBUG] Available serial ports: {[p.device for p in available_ports]}")
+            for port_info in available_ports:
+                logger.debug(f"[DEBUG]   Port: {port_info.device}, Desc: {port_info.description}, HWID: {port_info.hwid}")
+
             with self._lock:
                 if self._serial and self._serial.is_open:
+                    logger.debug(f"[DEBUG] Serial already open, skipping reconnect")
                     return
+
+                logger.debug(f"[DEBUG] Creating Serial object with port={self._port}, baudrate={self._baudrate}")
+                logger.debug(f"[DEBUG] Timeouts: read={self._read_timeout}s, write={self._write_timeout}s")
+
                 self._serial = serial.Serial(
                     port=self._port,
                     baudrate=self._baudrate,
                     timeout=self._read_timeout,
                     write_timeout=self._write_timeout,
                 )
+
+                logger.debug(f"[DEBUG] Serial object created successfully")
+                logger.debug(f"[DEBUG] Serial is_open: {self._serial.is_open}")
+                logger.debug(f"[DEBUG] Serial port name: {self._serial.name}")
+                logger.debug(f"[DEBUG] Serial settings: {self._serial.get_settings()}")
+
+                logger.debug(f"[DEBUG] Resetting input buffer...")
                 self._serial.reset_input_buffer()
+                logger.debug(f"[DEBUG] Resetting output buffer...")
                 self._serial.reset_output_buffer()
+
+                logger.debug(f"[DEBUG] Sleeping 0.15s for port stabilization...")
                 time.sleep(0.15)
+
+                # Check buffer states after stabilization
+                logger.debug(f"[DEBUG] After stabilization - in_waiting: {self._serial.in_waiting}, out_waiting: {self._serial.out_waiting}")
+
                 self._connected = True
-                logger.info(f"Connected to robot on {self._port}")
-        except ImportError:
-            logger.warning("PySerial not installed, using mock mode")
+                logger.info(f"[SUCCESS] Connected to robot on {self._port}")
+
+        except ImportError as e:
+            logger.warning(f"[WARNING] PySerial not installed, using mock mode. Error: {e}")
+            logger.debug(f"[DEBUG] ImportError traceback:\n{traceback.format_exc()}")
             self._connected = False
         except Exception as e:
-            logger.error(f"Failed to connect to robot: {e}")
+            logger.error(f"[ERROR] Failed to connect to robot: {e}")
+            logger.debug(f"[DEBUG] Connection error traceback:\n{traceback.format_exc()}")
             self._connected = False
             raise SerialNotConnectedError(f"Cannot connect to {self._port}: {e}")
 
     def close(self) -> None:
         """Close the serial port gracefully."""
+        logger.debug(f"[DEBUG] close() called")
         with self._lock:
             if self._serial and self._serial.is_open:
-                self._serial.close()
+                logger.debug(f"[DEBUG] Closing serial port...")
+                try:
+                    self._serial.close()
+                    logger.debug(f"[DEBUG] Serial port closed successfully")
+                except Exception as e:
+                    logger.error(f"[ERROR] Error closing serial port: {e}")
+                    logger.debug(f"[DEBUG] Close error traceback:\n{traceback.format_exc()}")
+            else:
+                logger.debug(f"[DEBUG] Serial was already closed or None")
             self._serial = None
             self._connected = False
-            logger.info("Disconnected from robot")
+            logger.info("[INFO] Disconnected from robot")
 
     def is_connected(self) -> bool:
         """Return True if serial port is open."""
-        return self._connected and self._serial is not None and self._serial.is_open
+        connected = self._connected and self._serial is not None and self._serial.is_open
+        logger.debug(f"[DEBUG] is_connected() check: _connected={self._connected}, _serial={self._serial is not None}, is_open={self._serial.is_open if self._serial else 'N/A'} => {connected}")
+        return connected
 
     def _require_serial(self):
+        logger.debug(f"[DEBUG] _require_serial() called")
         if not self.is_connected():
+            logger.error(f"[ERROR] Serial port not connected when required!")
             raise SerialNotConnectedError("Serial port not connected")
+        logger.debug(f"[DEBUG] Serial connection verified OK")
 
     def _validate_job(self, dose_g: float, grind_grade: int, recipe_no: int) -> None:
         if not (self._MIN_DOSE <= dose_g <= self._MAX_DOSE):
@@ -112,12 +166,77 @@ class RobotControlBoardSerialClient:
         line = f"JOB,{cmd.dose_g:.2f},{cmd.grind_grade},{cmd.recipe_no}"
         return line.encode("ascii") + self._newline
 
-    def _readline_until_deadline(self, deadline: float) -> Optional[bytes]:
-        while time.monotonic() < deadline:
-            line = self._serial.readline()
-            if line:
-                return line.strip()
-            time.sleep(0.05)
+    def _read_response(self, timeout: float = None) -> Optional[bytes]:
+        """
+        Read response from serial using the same approach as the working test script.
+        Waits for data to arrive, then reads all available bytes.
+        """
+        if timeout is None:
+            timeout = self._ack_timeout
+
+        logger.debug(f"[DEBUG] _read_response() called, timeout={timeout}s")
+        start_time = time.monotonic()
+        accumulated_data = b""
+
+        # First, wait a bit for data to arrive (like the working script does)
+        time.sleep(0.5)
+
+        while (time.monotonic() - start_time) < timeout:
+            try:
+                # Check serial state before read
+                if not self._serial or not self._serial.is_open:
+                    logger.error(f"[ERROR] Serial port closed during read!")
+                    return None
+
+                # Check bytes waiting (like working script: ser.in_waiting)
+                in_waiting = self._serial.in_waiting
+                logger.debug(f"[DEBUG] in_waiting={in_waiting}, accumulated={len(accumulated_data)} bytes")
+
+                if in_waiting > 0:
+                    # Read all available bytes (like working script: ser.read(ser.in_waiting))
+                    data = self._serial.read(in_waiting)
+                    logger.debug(f"[DEBUG] Read {len(data)} bytes: {data!r}")
+                    logger.debug(f"[DEBUG] Hex: {data.hex()}")
+                    accumulated_data += data
+
+                    # Check if we have a complete response (ends with newline or contains ACK/ERR)
+                    decoded = accumulated_data.decode('ascii', errors='replace').strip()
+                    if decoded:
+                        # Check for complete response
+                        if decoded.upper() in ('ACK', 'OK') or decoded.upper().startswith('ERR'):
+                            logger.debug(f"[DEBUG] Complete response detected: {decoded}")
+                            return accumulated_data.strip()
+                        # Also check if we got a newline (complete line)
+                        if b'\n' in accumulated_data or b'\r' in accumulated_data:
+                            logger.debug(f"[DEBUG] Newline detected, response complete")
+                            return accumulated_data.strip()
+
+                    # Small delay before checking for more data
+                    time.sleep(0.1)
+                else:
+                    # No data yet, check if we already have a complete response
+                    if accumulated_data:
+                        decoded = accumulated_data.decode('ascii', errors='replace').strip()
+                        if decoded.upper() in ('ACK', 'OK') or decoded.upper().startswith('ERR'):
+                            logger.debug(f"[DEBUG] Returning accumulated response: {decoded}")
+                            return accumulated_data.strip()
+
+                    time.sleep(0.05)
+
+            except Exception as e:
+                logger.error(f"[ERROR] Exception during read: {e}")
+                logger.debug(f"[DEBUG] Read exception traceback:\n{traceback.format_exc()}")
+                if "Broken pipe" in str(e) or "disconnected" in str(e).lower():
+                    logger.error(f"[ERROR] BROKEN PIPE DETECTED!")
+                    self._connected = False
+                return None
+
+        # Timeout reached - return whatever we have
+        if accumulated_data:
+            logger.warning(f"[WARNING] Timeout, returning partial data: {accumulated_data!r}")
+            return accumulated_data.strip()
+
+        logger.warning(f"[WARNING] Timeout reached, no data received")
         return None
 
     def send_job(self, dose_g: float, grind_grade: int, recipe_no: int) -> str:
@@ -125,42 +244,191 @@ class RobotControlBoardSerialClient:
         Send a drink job to the robot board.
         Returns 'ACK' on success, raises SerialProtocolError on failure.
         """
+        logger.debug(f"[DEBUG] send_job() called: dose_g={dose_g}, grind_grade={grind_grade}, recipe_no={recipe_no}")
+
         self._validate_job(dose_g, grind_grade, recipe_no)
+        logger.debug(f"[DEBUG] Job parameters validated OK")
+
         cmd = JobCommand(dose_g, grind_grade, recipe_no)
+        logger.debug(f"[DEBUG] JobCommand created: {cmd}")
 
         with self._lock:
+            logger.debug(f"[DEBUG] Lock acquired for send_job")
+
             self._require_serial()
+
+            # Check serial health before write
+            logger.debug(f"[DEBUG] Pre-write serial state:")
+            logger.debug(f"[DEBUG]   is_open: {self._serial.is_open}")
+            logger.debug(f"[DEBUG]   in_waiting: {self._serial.in_waiting}")
+            logger.debug(f"[DEBUG]   out_waiting: {self._serial.out_waiting}")
+
+            # Clear any stale data in buffers
+            if self._serial.in_waiting > 0:
+                stale_data = self._serial.read(self._serial.in_waiting)
+                logger.warning(f"[WARNING] Cleared {len(stale_data)} stale bytes from input buffer: {stale_data!r}")
+
             tx_line = self._format_job_line(cmd)
-            self._serial.write(tx_line)
-            logger.info(f"Sent: {tx_line.decode().strip()}")
-            self._serial.flush()  # Ensure data is sent immediately
-            deadline = time.monotonic() + self._ack_timeout
-            response = self._readline_until_deadline(deadline)
+            logger.debug(f"[DEBUG] Formatted TX line: {tx_line!r}")
+            logger.debug(f"[DEBUG] TX line hex: {tx_line.hex()}")
+
+            try:
+                bytes_written = self._serial.write(tx_line)
+                logger.info(f"[INFO] Sent: {tx_line.decode().strip()} ({bytes_written} bytes)")
+                logger.debug(f"[DEBUG] Write completed, bytes_written={bytes_written}")
+
+                logger.debug(f"[DEBUG] Flushing serial output...")
+                self._serial.flush()
+                logger.debug(f"[DEBUG] Flush completed")
+
+                # Verify out_waiting after flush
+                logger.debug(f"[DEBUG] Post-flush out_waiting: {self._serial.out_waiting}")
+
+            except Exception as e:
+                logger.error(f"[ERROR] Write/flush failed: {e}")
+                logger.debug(f"[DEBUG] Write error traceback:\n{traceback.format_exc()}")
+                if "Broken pipe" in str(e) or "write" in str(e).lower():
+                    logger.error(f"[ERROR] BROKEN PIPE on write - marking connection as dead")
+                    self._connected = False
+                raise SerialProtocolError(f"Write failed: {e}")
+
+            logger.debug(f"[DEBUG] Waiting for response, timeout={self._ack_timeout}s")
+
+            response = self._read_response(timeout=self._ack_timeout)
 
             if response is None:
+                logger.error(f"[ERROR] No response received within {self._ack_timeout}s timeout")
+                # Try to diagnose the issue
+                logger.debug(f"[DEBUG] Post-timeout serial state:")
+                try:
+                    logger.debug(f"[DEBUG]   is_open: {self._serial.is_open}")
+                    logger.debug(f"[DEBUG]   in_waiting: {self._serial.in_waiting}")
+                except Exception as e:
+                    logger.error(f"[ERROR] Cannot check serial state: {e}")
                 raise SerialProtocolError("Timeout waiting for ACK/ERR")
 
             response_str = response.decode("ascii", errors="replace")
-            logger.info(f"Received: {response_str}")
+            logger.info(f"[INFO] Received: {response_str}")
+            logger.debug(f"[DEBUG] Response bytes: {response!r}")
 
             if response_str.upper() == "ACK":
+                logger.debug(f"[DEBUG] ACK received successfully")
                 return "ACK"
             elif response_str.upper().startswith("ERR"):
+                logger.error(f"[ERROR] Robot returned error: {response_str}")
                 raise SerialProtocolError(f"Robot error: {response_str}")
             else:
+                logger.warning(f"[WARNING] Unexpected response format: {response_str}")
                 raise SerialProtocolError(f"Unexpected response: {response_str}")
 
     def get_status(self) -> str:
         """Request status from the robot."""
+        logger.debug(f"[DEBUG] get_status() called")
+
         with self._lock:
+            logger.debug(f"[DEBUG] Lock acquired for get_status")
+
             self._require_serial()
-            self._serial.write(b"STATUS" + self._newline)
-            deadline = time.monotonic() + self._ack_timeout
-            response = self._readline_until_deadline(deadline)
-            self._serial.flush()  # Ensure data is sent immediately
+
+            # Check serial health before operation
+            logger.debug(f"[DEBUG] Pre-status serial state:")
+            logger.debug(f"[DEBUG]   is_open: {self._serial.is_open}")
+            logger.debug(f"[DEBUG]   in_waiting: {self._serial.in_waiting}")
+            logger.debug(f"[DEBUG]   out_waiting: {self._serial.out_waiting}")
+
+            # Clear any stale data
+            if self._serial.in_waiting > 0:
+                stale_data = self._serial.read(self._serial.in_waiting)
+                logger.warning(f"[WARNING] Cleared {len(stale_data)} stale bytes: {stale_data!r}")
+
+            status_cmd = b"STATUS" + self._newline
+            logger.debug(f"[DEBUG] Sending status command: {status_cmd!r}")
+
+            try:
+                bytes_written = self._serial.write(status_cmd)
+                logger.debug(f"[DEBUG] Status command sent ({bytes_written} bytes)")
+
+                # Flush BEFORE reading (was incorrectly placed after)
+                logger.debug(f"[DEBUG] Flushing serial output...")
+                self._serial.flush()
+                logger.debug(f"[DEBUG] Flush completed")
+
+            except Exception as e:
+                logger.error(f"[ERROR] Failed to send STATUS command: {e}")
+                logger.debug(f"[DEBUG] Status write error traceback:\n{traceback.format_exc()}")
+                if "Broken pipe" in str(e):
+                    logger.error(f"[ERROR] BROKEN PIPE on status write")
+                    self._connected = False
+                raise SerialProtocolError(f"Status write failed: {e}")
+
+            logger.debug(f"[DEBUG] Waiting for status response, timeout={self._ack_timeout}s")
+
+            response = self._read_response(timeout=self._ack_timeout)
+
             if response:
-                return response.decode("ascii", errors="replace")
+                response_str = response.decode("ascii", errors="replace")
+                logger.info(f"[INFO] Status response: {response_str}")
+                return response_str
+
+            logger.error(f"[ERROR] No status response received")
             raise SerialProtocolError("Timeout waiting for status response")
+
+
+    def check_connection_health(self) -> tuple[bool, str]:
+        """
+        Check if the serial connection is healthy.
+        Returns (is_healthy: bool, status_message: str)
+        """
+        logger.debug(f"[DEBUG] check_connection_health() called")
+
+        if self._serial is None:
+            logger.debug(f"[DEBUG] Health check: _serial is None")
+            return False, "Serial object is None"
+
+        if not self._serial.is_open:
+            logger.debug(f"[DEBUG] Health check: Serial port not open")
+            return False, "Serial port is not open"
+
+        try:
+            # Check if we can access port properties (will fail on broken pipe)
+            in_waiting = self._serial.in_waiting
+            out_waiting = self._serial.out_waiting
+            logger.debug(f"[DEBUG] Health check OK: in_waiting={in_waiting}, out_waiting={out_waiting}")
+            return True, f"Healthy (in_waiting={in_waiting}, out_waiting={out_waiting})"
+        except OSError as e:
+            logger.error(f"[ERROR] Health check failed with OSError: {e}")
+            self._connected = False
+            return False, f"OSError: {e}"
+        except Exception as e:
+            logger.error(f"[ERROR] Health check failed: {e}")
+            return False, f"Error: {e}"
+
+    def reconnect(self, max_attempts: int = 3, delay: float = 1.0) -> bool:
+        """
+        Attempt to reconnect to the serial port.
+        Returns True if reconnection successful.
+        """
+        logger.info(f"[INFO] Attempting reconnection (max {max_attempts} attempts)...")
+
+        for attempt in range(1, max_attempts + 1):
+            logger.debug(f"[DEBUG] Reconnect attempt {attempt}/{max_attempts}")
+
+            # First, close existing connection
+            self.close()
+            time.sleep(delay)
+
+            try:
+                self.connect()
+                if self.is_connected():
+                    logger.info(f"[SUCCESS] Reconnected on attempt {attempt}")
+                    return True
+            except Exception as e:
+                logger.warning(f"[WARNING] Reconnect attempt {attempt} failed: {e}")
+
+            time.sleep(delay)
+
+        logger.error(f"[ERROR] Failed to reconnect after {max_attempts} attempts")
+        return False
 
 
 # Global singleton instance
@@ -191,6 +459,8 @@ def send_manual_order(dose_g: float, grind_grade: int, recipe_no: int) -> tuple[
     Send a manual order to the robot.
     Returns (success: bool, message: str)
     """
+    logger.debug(f"[DEBUG] send_manual_order() called: dose={dose_g}g, grade={grind_grade}, recipe={recipe_no}")
+
     # Demo mode - simulate successful order
     if is_demo_mode():
         logger.info(f"[DEMO] Simulating order: {dose_g}g, grade {grind_grade}, recipe {recipe_no}")
@@ -199,43 +469,96 @@ def send_manual_order(dose_g: float, grind_grade: int, recipe_no: int) -> tuple[
 
     client = get_robot_client()
 
+    # Check connection health first
+    is_healthy, health_status = client.check_connection_health()
+    logger.debug(f"[DEBUG] Connection health: {is_healthy}, status: {health_status}")
+
+    if not is_healthy:
+        logger.warning(f"[WARNING] Connection unhealthy, attempting reconnect...")
+        if not client.reconnect():
+            return False, f"Robot connection lost and reconnect failed: {health_status}"
+
     # Check if connected, try to connect if not
     if not client.is_connected():
+        logger.debug(f"[DEBUG] Not connected, attempting to connect...")
         try:
             client.connect()
         except SerialNotConnectedError as e:
+            logger.error(f"[ERROR] Failed to connect: {e}")
             return False, f"Robot not connected: {e}"
 
     try:
+        logger.debug(f"[DEBUG] Sending job to robot...")
         result = client.send_job(dose_g, grind_grade, recipe_no)
+        logger.info(f"[SUCCESS] Order sent successfully: {result}")
         return True, result
     except SerialProtocolError as e:
+        logger.error(f"[ERROR] Protocol error: {e}")
+        # Check if it's a broken pipe and try reconnect
+        if "Broken pipe" in str(e) or "Write failed" in str(e):
+            logger.warning(f"[WARNING] Broken pipe detected, will try reconnect on next call")
         return False, str(e)
     except SerialNotConnectedError as e:
+        logger.error(f"[ERROR] Not connected: {e}")
         return False, str(e)
     except Exception as e:
-        logger.exception("Unexpected error sending order")
+        logger.exception("[ERROR] Unexpected error sending order")
+        logger.debug(f"[DEBUG] Full traceback:\n{traceback.format_exc()}")
         return False, f"Unexpected error: {e}"
 
 
 def check_robot_connection() -> tuple[bool, str]:
     """Check if robot is connected and responsive."""
+    logger.debug(f"[DEBUG] check_robot_connection() called")
+
     # Demo mode - always connected
     if is_demo_mode():
+        logger.debug(f"[DEBUG] Demo mode active")
         return True, "Demo Mode - Simulated Connection"
 
     client = get_robot_client()
 
+    # Check connection health first
+    is_healthy, health_status = client.check_connection_health()
+    logger.debug(f"[DEBUG] Health check result: healthy={is_healthy}, status={health_status}")
+
+    if not is_healthy:
+        logger.warning(f"[WARNING] Unhealthy connection detected: {health_status}")
+        # Try to reconnect
+        if client.reconnect():
+            logger.info(f"[INFO] Reconnected successfully after health check failure")
+        else:
+            logger.error(f"[ERROR] Reconnect failed after health check failure")
+            return False, f"Connection unhealthy: {health_status}"
+
     if not client.is_connected():
+        logger.debug(f"[DEBUG] Not connected, attempting connection...")
         try:
             client.connect()
-        except SerialNotConnectedError:
-            return False, "Not connected"
+            logger.info(f"[INFO] Connected successfully")
+        except SerialNotConnectedError as e:
+            logger.error(f"[ERROR] Failed to connect: {e}")
+            return False, f"Not connected: {e}"
 
     try:
+        logger.debug(f"[DEBUG] Requesting robot status...")
         status = client.get_status()
+        logger.info(f"[INFO] Robot status: {status}")
         return True, status
     except (SerialProtocolError, SerialNotConnectedError) as e:
+        logger.error(f"[ERROR] Status request failed: {e}")
+        # Try reconnect and retry once
+        logger.debug(f"[DEBUG] Attempting reconnect after status failure...")
+        if client.reconnect():
+            try:
+                status = client.get_status()
+                logger.info(f"[INFO] Status after reconnect: {status}")
+                return True, status
+            except Exception as retry_e:
+                logger.error(f"[ERROR] Status request failed after reconnect: {retry_e}")
+                return False, str(retry_e)
         return False, str(e)
     except Exception as e:
+        logger.error(f"[ERROR] Unexpected error checking connection: {e}")
+        logger.debug(f"[DEBUG] Full traceback:\n{traceback.format_exc()}")
         return False, f"Error: {e}"
