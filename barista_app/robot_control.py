@@ -508,7 +508,11 @@ def send_manual_order(dose_g: float, grind_grade: int, recipe_no: int) -> tuple[
 
 
 def check_robot_connection() -> tuple[bool, str]:
-    """Check if robot is connected and responsive."""
+    """
+    Check if robot is connected.
+    Note: We only check if the serial port is open, not if the robot responds to STATUS.
+    The robot may not support STATUS command - it only responds to JOB commands.
+    """
     logger.debug(f"[DEBUG] check_robot_connection() called")
 
     # Demo mode - always connected
@@ -540,25 +544,11 @@ def check_robot_connection() -> tuple[bool, str]:
             logger.error(f"[ERROR] Failed to connect: {e}")
             return False, f"Not connected: {e}"
 
-    try:
-        logger.debug(f"[DEBUG] Requesting robot status...")
-        status = client.get_status()
-        logger.info(f"[INFO] Robot status: {status}")
-        return True, status
-    except (SerialProtocolError, SerialNotConnectedError) as e:
-        logger.error(f"[ERROR] Status request failed: {e}")
-        # Try reconnect and retry once
-        logger.debug(f"[DEBUG] Attempting reconnect after status failure...")
-        if client.reconnect():
-            try:
-                status = client.get_status()
-                logger.info(f"[INFO] Status after reconnect: {status}")
-                return True, status
-            except Exception as retry_e:
-                logger.error(f"[ERROR] Status request failed after reconnect: {retry_e}")
-                return False, str(retry_e)
-        return False, str(e)
-    except Exception as e:
-        logger.error(f"[ERROR] Unexpected error checking connection: {e}")
-        logger.debug(f"[DEBUG] Full traceback:\n{traceback.format_exc()}")
-        return False, f"Error: {e}"
+    # If we got here, serial port is open and healthy
+    # Don't try to send STATUS command - robot may not support it
+    # Just report as connected since the port is open
+    if client.is_connected():
+        logger.info(f"[INFO] Robot connected on {client._port}")
+        return True, f"Connected on {client._port}"
+
+    return False, "Unknown connection state"
