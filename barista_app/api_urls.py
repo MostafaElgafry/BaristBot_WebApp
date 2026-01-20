@@ -24,4 +24,5 @@ urlpatterns = [
     path('settings/', api_views.SystemSettingsAPIView.as_view(), name='api-settings'),
     path('analytics/', api_views.AnalyticsAPIView.as_view(), name='api-analytics'),
     path('robot/status/', api_views.RobotStatusAPIView.as_view(), name='api-robot-status'),
+    path('orders/<int:order_id>/wait-completion/', api_views.OrderCompletionAPIView.as_view(), name='api-order-completion'),
 ]

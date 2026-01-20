@@ -24,7 +24,7 @@ from .serializers import (
     SystemSettingsSerializer, ActivityLogSerializer, AnalyticsDailySerializer,
     DashboardSerializer
 )
-from .robot_control import send_manual_order, check_robot_connection
+from .robot_control import send_manual_order, check_robot_connection, wait_for_order_completion
 
 
 class IsManagerPermission(permissions.BasePermission):
@@ -312,11 +312,11 @@ class ManualOrderViewSet(viewsets.ModelViewSet):
         )
 
         if success:
-            order.status = 'ack'
+            order.status = 'processing'
             order.response_message = message
             ActivityLog.objects.create(
-                action_type='order_completed',
-                description=f"Manual order #{order.id} sent successfully",
+                action_type='order_processing',
+                description=f"Manual order #{order.id} sent - robot processing",
                 user=request.user,
                 metadata={
                     'order_id': order.id,
@@ -518,4 +518,54 @@ class RobotStatusAPIView(APIView):
         return Response({
             'connected': connected,
             'status': status_msg
+        })
+
+
+class OrderCompletionAPIView(APIView):
+    """Wait for order completion from robot."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, order_id):
+        """Wait for completion notification and update order status."""
+        try:
+            order = ManualOrder.objects.get(id=order_id)
+        except ManualOrder.DoesNotExist:
+            return Response({'error': 'Order not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        # Only wait for orders that are processing
+        if order.status != 'processing':
+            return Response({
+                'order_id': order.id,
+                'status': order.status,
+                'message': f'Order is not processing (status: {order.status})'
+            })
+
+        # Get timeout from request (default 60 seconds)
+        timeout = float(request.data.get('timeout', 60.0))
+
+        # Wait for completion
+        success, message = wait_for_order_completion(timeout=timeout)
+
+        if success:
+            order.status = 'completed'
+            order.response_message = message
+            order.save()
+            ActivityLog.objects.create(
+                action_type='order_completed',
+                description=f"Manual order #{order.id} completed",
+                user=request.user,
+                metadata={'order_id': order.id, 'completion_message': message}
+            )
+        else:
+            # Keep as processing if timeout, set error if actual error
+            if 'Timeout' not in message:
+                order.status = 'error'
+                order.response_message = message
+                order.save()
+
+        return Response({
+            'order_id': order.id,
+            'status': order.status,
+            'message': message,
+            'completed': success
         })

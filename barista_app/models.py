@@ -205,6 +205,8 @@ class ManualOrder(models.Model):
         ('pending', 'Pending'),
         ('sent', 'Sent'),
         ('ack', 'Acknowledged'),
+        ('processing', 'Processing'),
+        ('completed', 'Completed'),
         ('error', 'Error'),
     ]
 

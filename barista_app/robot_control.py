@@ -314,12 +314,46 @@ class RobotControlBoardSerialClient:
             if response_str.upper() == "ACK":
                 logger.debug(f"[DEBUG] ACK received successfully")
                 return "ACK"
+            elif response_str.upper() in ("OK", "DONE", "COMPLETE"):
+                # Robot might send completion directly without separate ACK
+                logger.debug(f"[DEBUG] Completion received: {response_str}")
+                return response_str.upper()
             elif response_str.upper().startswith("ERR"):
                 logger.error(f"[ERROR] Robot returned error: {response_str}")
                 raise SerialProtocolError(f"Robot error: {response_str}")
             else:
                 logger.warning(f"[WARNING] Unexpected response format: {response_str}")
                 raise SerialProtocolError(f"Unexpected response: {response_str}")
+
+    def wait_for_completion(self, timeout: float = 60.0) -> str:
+        """
+        Wait for job completion notification from robot.
+        Call this after send_job returns ACK.
+        Returns completion message (OK, DONE, COMPLETE) or raises timeout.
+        """
+        logger.debug(f"[DEBUG] wait_for_completion() called, timeout={timeout}s")
+
+        with self._lock:
+            self._require_serial()
+
+            logger.debug(f"[DEBUG] Waiting for completion notification...")
+            response = self._read_response(timeout=timeout)
+
+            if response is None:
+                logger.warning(f"[WARNING] No completion notification within {timeout}s")
+                raise SerialProtocolError("Timeout waiting for completion")
+
+            response_str = response.decode("ascii", errors="replace").strip()
+            logger.info(f"[INFO] Completion notification: {response_str}")
+
+            if response_str.upper() in ("OK", "DONE", "COMPLETE", "FINISHED"):
+                return response_str.upper()
+            elif response_str.upper().startswith("ERR"):
+                raise SerialProtocolError(f"Robot error during job: {response_str}")
+            else:
+                # Accept any response as potential completion
+                logger.warning(f"[WARNING] Unexpected completion format: {response_str}")
+                return response_str
 
     def get_status(self) -> str:
         """Request status from the robot."""
@@ -504,6 +538,37 @@ def send_manual_order(dose_g: float, grind_grade: int, recipe_no: int) -> tuple[
     except Exception as e:
         logger.exception("[ERROR] Unexpected error sending order")
         logger.debug(f"[DEBUG] Full traceback:\n{traceback.format_exc()}")
+        return False, f"Unexpected error: {e}"
+
+
+def wait_for_order_completion(timeout: float = 60.0) -> tuple[bool, str]:
+    """
+    Wait for robot to send completion notification.
+    Call this after send_manual_order returns successfully.
+    Returns (success: bool, message: str)
+    """
+    logger.debug(f"[DEBUG] wait_for_order_completion() called, timeout={timeout}s")
+
+    # Demo mode - simulate completion
+    if is_demo_mode():
+        logger.info(f"[DEMO] Simulating completion after 2 seconds")
+        time.sleep(2.0)
+        return True, "DONE (Demo Mode)"
+
+    client = get_robot_client()
+
+    if not client.is_connected():
+        return False, "Robot not connected"
+
+    try:
+        result = client.wait_for_completion(timeout=timeout)
+        logger.info(f"[SUCCESS] Order completed: {result}")
+        return True, result
+    except SerialProtocolError as e:
+        logger.error(f"[ERROR] Completion error: {e}")
+        return False, str(e)
+    except Exception as e:
+        logger.exception("[ERROR] Unexpected error waiting for completion")
         return False, f"Unexpected error: {e}"
 
 
