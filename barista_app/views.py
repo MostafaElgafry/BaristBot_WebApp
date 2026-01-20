@@ -249,10 +249,20 @@ def settings_users(request):
 @login_required
 def settings_system(request):
     """System information."""
-    settings = SystemSettings.get_settings()
+    from django.conf import settings as django_settings
+
+    system_settings = SystemSettings.get_settings()
+
+    # Get robot connection settings
+    serial_port = getattr(django_settings, 'ROBOT_SERIAL_PORT', 'COM7')
+    baud_rate = getattr(django_settings, 'ROBOT_BAUDRATE', 115200)
+    demo_mode = getattr(django_settings, 'ROBOT_DEMO_MODE', True)
 
     return render(request, 'barista/settings/system.html', {
-        'settings': settings,
+        'settings': system_settings,
+        'serial_port': serial_port,
+        'baud_rate': baud_rate,
+        'demo_mode': demo_mode,
     })
 
 
