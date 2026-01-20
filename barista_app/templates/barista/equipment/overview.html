@@ -1,0 +1,165 @@
+{% extends 'barista/base.html' %}
+
+{% block title %}Equipment - Barista Robot Control{% endblock %}
+
+{% block content %}
+<div class="top-bar">
+    <h1 class="page-title">
+        <i class="bi bi-gear me-2"></i>Equipment Configuration
+    </h1>
+    <a href="{% url 'dashboard' %}" class="btn btn-outline-secondary">
+        <i class="bi bi-arrow-left me-1"></i> Back
+    </a>
+</div>
+
+<div class="row g-4">
+    <!-- Grinders Card -->
+    <div class="col-lg-4 col-md-6">
+        <a href="{% url 'grinders-list' %}" class="text-decoration-none">
+            <div class="card h-100 border-0 shadow-sm">
+                <div class="card-body text-center py-5">
+                    <div class="mb-4">
+                        <div class="stat-icon grinders mx-auto" style="width: 100px; height: 100px; font-size: 2.5rem;">
+                            <i class="bi bi-gear-fill"></i>
+                        </div>
+                    </div>
+                    <h3 class="card-title text-dark">Grinders</h3>
+                    <p class="text-muted mb-3">Configure coffee grinders and grind levels</p>
+                    <div class="d-flex justify-content-center align-items-center gap-3">
+                        <span class="badge bg-primary fs-5 px-3 py-2">{{ grinders_count }}</span>
+                        <span class="text-muted">Configured</span>
+                    </div>
+                </div>
+                <div class="card-footer bg-transparent border-0 text-center pb-4">
+                    <span class="btn btn-primary">
+                        <i class="bi bi-arrow-right me-1"></i> Manage Grinders
+                    </span>
+                </div>
+            </div>
+        </a>
+    </div>
+
+    <!-- Dozers Card -->
+    <div class="col-lg-4 col-md-6">
+        <a href="{% url 'dozers-list' %}" class="text-decoration-none">
+            <div class="card h-100 border-0 shadow-sm">
+                <div class="card-body text-center py-5">
+                    <div class="mb-4">
+                        <div class="stat-icon dozers mx-auto" style="width: 100px; height: 100px; font-size: 2.5rem;">
+                            <i class="bi bi-funnel-fill"></i>
+                        </div>
+                    </div>
+                    <h3 class="card-title text-dark">Dozers</h3>
+                    <p class="text-muted mb-3">Configure dose amounts and linked grinders</p>
+                    <div class="d-flex justify-content-center align-items-center gap-3">
+                        <span class="badge bg-primary fs-5 px-3 py-2">{{ dozers_count }}</span>
+                        <span class="text-muted">Configured</span>
+                    </div>
+                </div>
+                <div class="card-footer bg-transparent border-0 text-center pb-4">
+                    <span class="btn btn-primary">
+                        <i class="bi bi-arrow-right me-1"></i> Manage Dozers
+                    </span>
+                </div>
+            </div>
+        </a>
+    </div>
+
+    <!-- Tone Machine Card -->
+    <div class="col-lg-4 col-md-6">
+        <a href="{% url 'tone-machine' %}" class="text-decoration-none">
+            <div class="card h-100 border-0 shadow-sm">
+                <div class="card-body text-center py-5">
+                    <div class="mb-4">
+                        <div class="stat-icon tone mx-auto" style="width: 100px; height: 100px; font-size: 2.5rem;">
+                            <i class="bi bi-grid-3x3-gap-fill"></i>
+                        </div>
+                    </div>
+                    <h3 class="card-title text-dark">Tone Machine</h3>
+                    <p class="text-muted mb-3">Configure 4 programmable recipe buttons</p>
+                    <div class="d-flex justify-content-center align-items-center gap-3">
+                        <span class="badge bg-primary fs-5 px-3 py-2">4</span>
+                        <span class="text-muted">Buttons</span>
+                    </div>
+                </div>
+                <div class="card-footer bg-transparent border-0 text-center pb-4">
+                    <span class="btn btn-primary">
+                        <i class="bi bi-arrow-right me-1"></i> Configure Buttons
+                    </span>
+                </div>
+            </div>
+        </a>
+    </div>
+</div>
+
+<!-- Equipment Summary -->
+<div class="card mt-4">
+    <div class="card-header">
+        <i class="bi bi-list-check me-2"></i>Equipment Summary
+    </div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead>
+                    <tr>
+                        <th>Equipment</th>
+                        <th>Type</th>
+                        <th>Configuration</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for grinder in grinders %}
+                    <tr>
+                        <td><strong>{{ grinder.name }}</strong></td>
+                        <td><span class="badge bg-info">Grinder</span></td>
+                        <td>
+                            {{ grinder.coffee_type.name|default:"No coffee type" }} -
+                            Level {{ grinder.grind_level }}
+                        </td>
+                        <td>
+                            {% if grinder.is_active %}
+                            <span class="badge bg-success">Active</span>
+                            {% else %}
+                            <span class="badge bg-secondary">Inactive</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                    {% for dozer in dozers %}
+                    <tr>
+                        <td><strong>{{ dozer.name }}</strong></td>
+                        <td><span class="badge bg-danger">Dozer</span></td>
+                        <td>
+                            {{ dozer.dose_grams }}g -
+                            {{ dozer.linked_grinder.name|default:"Not linked" }}
+                        </td>
+                        <td>
+                            {% if dozer.is_active %}
+                            <span class="badge bg-success">Active</span>
+                            {% else %}
+                            <span class="badge bg-secondary">Inactive</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                    {% for button in tone_buttons %}
+                    <tr>
+                        <td><strong>Button {{ button.button_number }}</strong></td>
+                        <td><span class="badge bg-success">Tone Button</span></td>
+                        <td>{{ button.recipe.name|default:"No recipe assigned" }}</td>
+                        <td>
+                            {% if button.is_active %}
+                            <span class="badge bg-success">Active</span>
+                            {% else %}
+                            <span class="badge bg-secondary">Inactive</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

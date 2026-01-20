@@ -1,0 +1,199 @@
+{% extends 'barista/base.html' %}
+
+{% block title %}Tone Machine - Barista Robot Control{% endblock %}
+
+{% block content %}
+<div class="top-bar">
+    <h1 class="page-title">
+        <i class="bi bi-grid-3x3-gap me-2"></i>Tone Machine Configuration
+    </h1>
+    <a href="{% url 'equipment-overview' %}" class="btn btn-outline-secondary">
+        <i class="bi bi-arrow-left me-1"></i> Back
+    </a>
+</div>
+
+<div class="row">
+    <!-- Buttons Grid -->
+    <div class="col-lg-7">
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-grid-3x3-gap-fill me-2"></i>Recipe Buttons (4)
+            </div>
+            <div class="card-body">
+                <div class="row g-3">
+                    {% for button in buttons %}
+                    <div class="col-6">
+                        <div class="card h-100 border-2 {% if button.is_active %}border-primary{% else %}border-secondary{% endif %}"
+                             style="cursor: pointer;"
+                             onclick="editButton({{ button.button_number }})">
+                            <div class="card-body text-center py-4">
+                                <div class="display-4 mb-2 {% if button.is_active %}text-primary{% else %}text-secondary{% endif %}">
+                                    {{ button.button_number }}
+                                </div>
+                                <h5 class="mb-1">{{ button.label|default:"Button "|add:button.button_number }}</h5>
+                                <p class="text-muted mb-0">
+                                    {% if button.recipe %}
+                                    <i class="bi bi-cup-hot me-1"></i>{{ button.recipe.name }}
+                                    {% else %}
+                                    <i class="bi bi-dash-circle me-1"></i>No recipe assigned
+                                    {% endif %}
+                                </p>
+                                {% if button.is_active %}
+                                <span class="badge bg-success mt-2">Active</span>
+                                {% else %}
+                                <span class="badge bg-secondary mt-2">Inactive</span>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit Form -->
+    <div class="col-lg-5">
+        <div class="card" id="edit-form-card" style="display: none;">
+            <div class="card-header">
+                <i class="bi bi-pencil me-2"></i>Edit Button <span id="button-number-display"></span>
+            </div>
+            <div class="card-body">
+                <form id="button-form">
+                    <input type="hidden" id="button-id">
+                    <input type="hidden" id="button-number">
+
+                    <div class="mb-4 text-center">
+                        <div class="display-1 text-primary mb-2" id="button-indicator">1</div>
+                        <span class="text-muted">Button Number</span>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Label (optional)</label>
+                        <input type="text" class="form-control" id="button-label"
+                               placeholder="e.g., Espresso, Latte">
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Recipe</label>
+                        <select class="form-select" id="button-recipe">
+                            <option value="">No recipe assigned</option>
+                            {% for recipe in recipes %}
+                            <option value="{{ recipe.id }}">{{ recipe.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="mb-4">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="button-active" checked>
+                            <label class="form-check-label" for="button-active">Active</label>
+                        </div>
+                    </div>
+
+                    <div class="d-flex gap-2">
+                        <button type="submit" class="btn btn-primary flex-grow-1">
+                            <i class="bi bi-check-lg me-1"></i> Save
+                        </button>
+                        <button type="button" class="btn btn-outline-secondary" onclick="hideForm()">
+                            Cancel
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- Recipe Quick Reference -->
+        <div class="card mt-3">
+            <div class="card-header">
+                <i class="bi bi-info-circle me-2"></i>Available Recipes
+            </div>
+            <div class="card-body p-0">
+                <ul class="list-group list-group-flush">
+                    {% for recipe in recipes %}
+                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                        <span>{{ recipe.name }}</span>
+                        {% if recipe.is_active %}
+                        <span class="badge bg-success">Active</span>
+                        {% else %}
+                        <span class="badge bg-secondary">Inactive</span>
+                        {% endif %}
+                    </li>
+                    {% empty %}
+                    <li class="list-group-item text-center text-muted">
+                        No recipes available
+                    </li>
+                    {% endfor %}
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    const buttonData = {
+        {% for button in buttons %}
+        {{ button.button_number }}: {
+            id: {{ button.id }},
+            button_number: {{ button.button_number }},
+            label: "{{ button.label|default:'' }}",
+            recipe: {{ button.recipe.id|default:'null' }},
+            is_active: {{ button.is_active|yesno:"true,false" }}
+        },
+        {% endfor %}
+    };
+
+    function editButton(buttonNumber) {
+        const button = buttonData[buttonNumber];
+        if (!button) return;
+
+        document.getElementById('button-id').value = button.id;
+        document.getElementById('button-number').value = button.button_number;
+        document.getElementById('button-number-display').textContent = '#' + button.button_number;
+        document.getElementById('button-indicator').textContent = button.button_number;
+        document.getElementById('button-label').value = button.label;
+        document.getElementById('button-recipe').value = button.recipe || '';
+        document.getElementById('button-active').checked = button.is_active;
+        document.getElementById('edit-form-card').style.display = 'block';
+    }
+
+    function hideForm() {
+        document.getElementById('edit-form-card').style.display = 'none';
+    }
+
+    document.getElementById('button-form').addEventListener('submit', async function(e) {
+        e.preventDefault();
+
+        const id = document.getElementById('button-id').value;
+        const data = {
+            button_number: parseInt(document.getElementById('button-number').value),
+            label: document.getElementById('button-label').value,
+            recipe: document.getElementById('button-recipe').value || null,
+            is_active: document.getElementById('button-active').checked
+        };
+
+        try {
+            const response = await fetch(`/api/tone-buttons/${id}/`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrftoken
+                },
+                body: JSON.stringify(data)
+            });
+
+            if (response.ok) {
+                showToast('Button updated successfully');
+                location.reload();
+            } else {
+                const error = await response.json();
+                showToast('Error: ' + JSON.stringify(error), 'error');
+            }
+        } catch (e) {
+            showToast('Failed to save button', 'error');
+        }
+    });
+</script>
+{% endblock %}

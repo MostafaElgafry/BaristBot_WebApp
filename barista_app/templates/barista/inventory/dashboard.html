@@ -1,0 +1,123 @@
+{% extends 'barista/base.html' %}
+
+{% block title %}Inventory - Barista Robot Control{% endblock %}
+
+{% block content %}
+<div class="top-bar">
+    <h1 class="page-title">
+        <i class="bi bi-box-seam me-2"></i>Inventory Dashboard
+    </h1>
+    <div class="d-flex gap-2">
+        <a href="{% url 'inventory-update' %}" class="btn btn-primary">
+            <i class="bi bi-pencil me-1"></i> Update Counts
+        </a>
+        <a href="{% url 'inventory-warnings' %}" class="btn btn-outline-secondary">
+            <i class="bi bi-exclamation-triangle me-1"></i> Warning Settings
+        </a>
+    </div>
+</div>
+
+<!-- Bean Levels -->
+<div class="card mb-4">
+    <div class="card-header">
+        <i class="bi bi-cup-hot-fill me-2"></i>Coffee Bean Levels
+    </div>
+    <div class="card-body">
+        <div class="row g-4">
+            {% for bean in beans %}
+            <div class="col-md-6 col-lg-3">
+                <div class="text-center mb-3">
+                    <h5>{{ bean.name }}</h5>
+                    <small class="text-muted">{{ bean.coffee_type.name|default:"Unknown origin" }}</small>
+                </div>
+                <div class="progress mb-2" style="height: 2rem;">
+                    <div class="progress-bar
+                        {% if bean.current_level <= bean.warning_threshold %}bg-danger
+                        {% elif bean.current_level <= 50 %}bg-warning
+                        {% else %}bg-success{% endif %}"
+                         style="width: {{ bean.current_level }}%;">
+                        {{ bean.current_level|floatformat:0 }}%
+                    </div>
+                </div>
+                {% if bean.is_warning %}
+                <div class="text-center">
+                    <span class="badge bg-danger">
+                        <i class="bi bi-exclamation-triangle me-1"></i>Low Stock
+                    </span>
+                </div>
+                {% endif %}
+            </div>
+            {% empty %}
+            <div class="col-12 text-center text-muted py-4">
+                <i class="bi bi-inbox" style="font-size: 3rem;"></i>
+                <p class="mt-2">No beans configured. Add inventory items to track them.</p>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+
+<!-- Cups & Servers -->
+<div class="row g-4">
+    <div class="col-md-6 col-lg-3">
+        <div class="card text-center h-100">
+            <div class="card-body">
+                <div class="display-4 text-primary mb-2">
+                    <i class="bi bi-cup"></i>
+                </div>
+                <h5>Takeaway Cups</h5>
+                <div class="display-6 {% if cups_takeaway and cups_takeaway.is_warning %}text-danger{% endif %}">
+                    {{ cups_takeaway.current_count|default:0 }}
+                </div>
+                {% if cups_takeaway and cups_takeaway.is_warning %}
+                <span class="badge bg-danger mt-2">Low Stock</span>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-6 col-lg-3">
+        <div class="card text-center h-100">
+            <div class="card-body">
+                <div class="display-4 text-info mb-2">
+                    <i class="bi bi-cup-fill"></i>
+                </div>
+                <h5>Dine-in Cups</h5>
+                <div class="display-6 {% if cups_dinein and cups_dinein.is_warning %}text-danger{% endif %}">
+                    {{ cups_dinein.current_count|default:0 }}
+                </div>
+                {% if cups_dinein and cups_dinein.is_warning %}
+                <span class="badge bg-danger mt-2">Low Stock</span>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-6 col-lg-3">
+        <div class="card text-center h-100">
+            <div class="card-body">
+                <div class="display-4 text-success mb-2">
+                    <i class="bi bi-person-workspace"></i>
+                </div>
+                <h5>Servers</h5>
+                <div class="display-6">
+                    {{ servers.current_count|default:0 }}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-6 col-lg-3">
+        <div class="card text-center h-100 bg-light">
+            <div class="card-body d-flex flex-column justify-content-center">
+                <a href="{% url 'inventory-update' %}" class="text-decoration-none">
+                    <div class="display-4 text-secondary mb-2">
+                        <i class="bi bi-plus-circle"></i>
+                    </div>
+                    <h5 class="text-secondary">Update Counts</h5>
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

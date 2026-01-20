@@ -1,0 +1,279 @@
+{% extends 'barista/base.html' %}
+
+{% block title %}Dozers - Barista Robot Control{% endblock %}
+
+{% block content %}
+<div class="top-bar">
+    <h1 class="page-title">
+        <i class="bi bi-funnel me-2"></i>Dozer Configuration
+    </h1>
+    <div class="d-flex gap-2">
+        <a href="{% url 'equipment-overview' %}" class="btn btn-outline-secondary">
+            <i class="bi bi-arrow-left me-1"></i> Back
+        </a>
+        <button class="btn btn-primary" onclick="showAddModal()">
+            <i class="bi bi-plus-lg me-1"></i> Add Dozer
+        </button>
+    </div>
+</div>
+
+<div class="row">
+    <!-- Dozers List -->
+    <div class="col-lg-7">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-list me-2"></i>Dozers</span>
+                <span class="badge bg-primary">{{ dozers|length }} Total</span>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Dose (g)</th>
+                                <th>Linked Grinder</th>
+                                <th>Status</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="dozers-table">
+                            {% for dozer in dozers %}
+                            <tr data-id="{{ dozer.id }}">
+                                <td><strong>{{ dozer.name }}</strong></td>
+                                <td>
+                                    <span class="badge bg-info fs-6">{{ dozer.dose_grams }}g</span>
+                                </td>
+                                <td>{{ dozer.linked_grinder.name|default:"-" }}</td>
+                                <td>
+                                    {% if dozer.is_active %}
+                                    <span class="badge bg-success">Active</span>
+                                    {% else %}
+                                    <span class="badge bg-secondary">Inactive</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <button class="btn btn-sm btn-outline-primary" onclick="editDozer({{ dozer.id }})">
+                                        <i class="bi bi-pencil"></i>
+                                    </button>
+                                    <button class="btn btn-sm btn-outline-danger" onclick="deleteDozer({{ dozer.id }})">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </td>
+                            </tr>
+                            {% empty %}
+                            <tr>
+                                <td colspan="5" class="text-center text-muted py-4">
+                                    No dozers configured. Click "Add Dozer" to create one.
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit Form -->
+    <div class="col-lg-5">
+        <div class="card" id="edit-form-card" style="display: none;">
+            <div class="card-header">
+                <i class="bi bi-pencil me-2"></i><span id="form-title">Edit Dozer</span>
+            </div>
+            <div class="card-body">
+                <form id="dozer-form">
+                    <input type="hidden" id="dozer-id">
+
+                    <div class="mb-3">
+                        <label class="form-label">Name</label>
+                        <input type="text" class="form-control" id="dozer-name" required
+                               placeholder="Enter dozer name">
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Dose (grams)</label>
+                        <input type="number" class="form-control" id="dozer-dose" required
+                               min="0.1" max="200" step="0.1" placeholder="18.0">
+                        <div class="mt-2">
+                            <small class="text-muted">Quick presets:</small>
+                            <div class="btn-group btn-group-sm mt-1">
+                                <button type="button" class="btn btn-outline-secondary" onclick="setDose(16)">16g</button>
+                                <button type="button" class="btn btn-outline-secondary" onclick="setDose(18)">18g</button>
+                                <button type="button" class="btn btn-outline-secondary" onclick="setDose(20)">20g</button>
+                                <button type="button" class="btn btn-outline-secondary" onclick="setDose(22)">22g</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Linked Grinder</label>
+                        <select class="form-select" id="dozer-grinder">
+                            <option value="">Select grinder (optional)</option>
+                            {% for grinder in grinders %}
+                            <option value="{{ grinder.id }}">{{ grinder.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="mb-4">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="dozer-active" checked>
+                            <label class="form-check-label" for="dozer-active">Active</label>
+                        </div>
+                    </div>
+
+                    <div class="d-flex gap-2">
+                        <button type="submit" class="btn btn-primary flex-grow-1">
+                            <i class="bi bi-check-lg me-1"></i> Save
+                        </button>
+                        <button type="button" class="btn btn-outline-secondary" onclick="hideForm()">
+                            Cancel
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- Number Keypad -->
+        <div class="card mt-3" id="keypad-card" style="display: none;">
+            <div class="card-header">
+                <i class="bi bi-grid-3x3 me-2"></i>Number Pad
+            </div>
+            <div class="card-body">
+                <div class="keypad mx-auto">
+                    <button class="keypad-btn" data-value="1">1</button>
+                    <button class="keypad-btn" data-value="2">2</button>
+                    <button class="keypad-btn" data-value="3">3</button>
+                    <button class="keypad-btn" data-value="4">4</button>
+                    <button class="keypad-btn" data-value="5">5</button>
+                    <button class="keypad-btn" data-value="6">6</button>
+                    <button class="keypad-btn" data-value="7">7</button>
+                    <button class="keypad-btn" data-value="8">8</button>
+                    <button class="keypad-btn" data-value="9">9</button>
+                    <button class="keypad-btn" data-value=".">.</button>
+                    <button class="keypad-btn" data-value="0">0</button>
+                    <button class="keypad-btn action" data-value="backspace"><i class="bi bi-backspace"></i></button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    let currentDozer = null;
+
+    function setDose(value) {
+        document.getElementById('dozer-dose').value = value;
+    }
+
+    function showAddModal() {
+        currentDozer = null;
+        document.getElementById('form-title').textContent = 'Add Dozer';
+        document.getElementById('dozer-id').value = '';
+        document.getElementById('dozer-name').value = '';
+        document.getElementById('dozer-dose').value = '18.0';
+        document.getElementById('dozer-grinder').value = '';
+        document.getElementById('dozer-active').checked = true;
+        document.getElementById('edit-form-card').style.display = 'block';
+        document.getElementById('keypad-card').style.display = 'block';
+    }
+
+    async function editDozer(id) {
+        try {
+            const response = await fetch(`/api/dozers/${id}/`);
+            const dozer = await response.json();
+
+            currentDozer = dozer;
+            document.getElementById('form-title').textContent = 'Edit Dozer';
+            document.getElementById('dozer-id').value = dozer.id;
+            document.getElementById('dozer-name').value = dozer.name;
+            document.getElementById('dozer-dose').value = dozer.dose_grams;
+            document.getElementById('dozer-grinder').value = dozer.linked_grinder || '';
+            document.getElementById('dozer-active').checked = dozer.is_active;
+            document.getElementById('edit-form-card').style.display = 'block';
+            document.getElementById('keypad-card').style.display = 'block';
+        } catch (e) {
+            showToast('Failed to load dozer', 'error');
+        }
+    }
+
+    async function deleteDozer(id) {
+        if (!confirm('Are you sure you want to delete this dozer?')) return;
+
+        try {
+            await fetch(`/api/dozers/${id}/`, {
+                method: 'DELETE',
+                headers: { 'X-CSRFToken': csrftoken }
+            });
+            showToast('Dozer deleted successfully');
+            location.reload();
+        } catch (e) {
+            showToast('Failed to delete dozer', 'error');
+        }
+    }
+
+    function hideForm() {
+        document.getElementById('edit-form-card').style.display = 'none';
+        document.getElementById('keypad-card').style.display = 'none';
+    }
+
+    document.getElementById('dozer-form').addEventListener('submit', async function(e) {
+        e.preventDefault();
+
+        const data = {
+            name: document.getElementById('dozer-name').value,
+            dose_grams: parseFloat(document.getElementById('dozer-dose').value),
+            linked_grinder: document.getElementById('dozer-grinder').value || null,
+            is_active: document.getElementById('dozer-active').checked
+        };
+
+        const id = document.getElementById('dozer-id').value;
+        const url = id ? `/api/dozers/${id}/` : '/api/dozers/';
+        const method = id ? 'PUT' : 'POST';
+
+        try {
+            const response = await fetch(url, {
+                method,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrftoken
+                },
+                body: JSON.stringify(data)
+            });
+
+            if (response.ok) {
+                showToast(id ? 'Dozer updated successfully' : 'Dozer created successfully');
+                location.reload();
+            } else {
+                const error = await response.json();
+                showToast('Error: ' + JSON.stringify(error), 'error');
+            }
+        } catch (e) {
+            showToast('Failed to save dozer', 'error');
+        }
+    });
+
+    // Initialize keypad
+    let activeKeypadInput = null;
+
+    document.getElementById('dozer-dose').addEventListener('focus', function() {
+        activeKeypadInput = this;
+    });
+
+    document.querySelectorAll('.keypad-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            if (!activeKeypadInput) return;
+
+            const value = this.dataset.value;
+            if (value === 'backspace') {
+                activeKeypadInput.value = activeKeypadInput.value.slice(0, -1);
+            } else {
+                activeKeypadInput.value += value;
+            }
+        });
+    });
+</script>
+{% endblock %}

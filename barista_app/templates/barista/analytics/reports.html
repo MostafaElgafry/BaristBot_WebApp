@@ -1,0 +1,177 @@
+{% extends 'barista/base.html' %}
+
+{% block title %}Reports - Barista Robot Control{% endblock %}
+
+{% block content %}
+<div class="top-bar">
+    <h1 class="page-title">
+        <i class="bi bi-file-earmark-text me-2"></i>Reports
+    </h1>
+    <a href="{% url 'analytics-overview' %}" class="btn btn-outline-secondary">
+        <i class="bi bi-arrow-left me-1"></i> Back to Analytics
+    </a>
+</div>
+
+<div class="row">
+    <div class="col-lg-6 mb-4">
+        <div class="card h-100">
+            <div class="card-header">
+                <i class="bi bi-cup-hot me-2"></i>Bean Performance
+            </div>
+            <div class="card-body">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Bean Type</th>
+                            <th>Cost/Cup</th>
+                            <th>Waste %</th>
+                            <th>Efficiency</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>Ethiopian</td>
+                            <td>$0.45</td>
+                            <td>2.3%</td>
+                            <td><span class="badge bg-success">High</span></td>
+                        </tr>
+                        <tr>
+                            <td>Colombian</td>
+                            <td>$0.38</td>
+                            <td>1.8%</td>
+                            <td><span class="badge bg-success">High</span></td>
+                        </tr>
+                        <tr>
+                            <td>Exotic Blend</td>
+                            <td>$0.62</td>
+                            <td>3.5%</td>
+                            <td><span class="badge bg-warning text-dark">Medium</span></td>
+                        </tr>
+                        <tr>
+                            <td>Indonesian</td>
+                            <td>$0.41</td>
+                            <td>2.1%</td>
+                            <td><span class="badge bg-success">High</span></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-6 mb-4">
+        <div class="card h-100">
+            <div class="card-header">
+                <i class="bi bi-download me-2"></i>Generate Reports
+            </div>
+            <div class="card-body">
+                <div class="mb-4">
+                    <label class="form-label fw-bold">Report Type</label>
+                    <select class="form-select" id="report-type">
+                        <option value="daily">Daily Report</option>
+                        <option value="weekly">Weekly Report</option>
+                        <option value="monthly">Monthly Report</option>
+                    </select>
+                </div>
+
+                <div class="mb-4">
+                    <label class="form-label fw-bold">Date Range</label>
+                    <div class="row g-2">
+                        <div class="col">
+                            <input type="date" class="form-control" id="start-date">
+                        </div>
+                        <div class="col">
+                            <input type="date" class="form-control" id="end-date">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mb-4">
+                    <label class="form-label fw-bold">Format</label>
+                    <div class="btn-group w-100" role="group">
+                        <input type="radio" class="btn-check" name="format" id="format-pdf" value="pdf" checked>
+                        <label class="btn btn-outline-primary" for="format-pdf">
+                            <i class="bi bi-file-pdf me-1"></i> PDF
+                        </label>
+                        <input type="radio" class="btn-check" name="format" id="format-csv" value="csv">
+                        <label class="btn btn-outline-primary" for="format-csv">
+                            <i class="bi bi-file-spreadsheet me-1"></i> CSV
+                        </label>
+                        <input type="radio" class="btn-check" name="format" id="format-email" value="email">
+                        <label class="btn btn-outline-primary" for="format-email">
+                            <i class="bi bi-envelope me-1"></i> Email
+                        </label>
+                    </div>
+                </div>
+
+                <button class="btn btn-primary w-100" onclick="generateReport()">
+                    <i class="bi bi-download me-2"></i>Generate Report
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Quick Stats -->
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-graph-up-arrow me-2"></i>Performance Summary
+            </div>
+            <div class="card-body">
+                <div class="row text-center">
+                    <div class="col-md-3 mb-3">
+                        <h6 class="text-muted">Total Cups (Month)</h6>
+                        <div class="display-6">1,234</div>
+                        <small class="text-success">+12% from last month</small>
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <h6 class="text-muted">Average Daily</h6>
+                        <div class="display-6">41</div>
+                        <small class="text-success">+5% from last month</small>
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <h6 class="text-muted">Bean Cost</h6>
+                        <div class="display-6">$456</div>
+                        <small class="text-danger">+3% from last month</small>
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <h6 class="text-muted">Uptime</h6>
+                        <div class="display-6">99.2%</div>
+                        <small class="text-success">Excellent</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // Set default dates
+    const today = new Date().toISOString().split('T')[0];
+    const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    document.getElementById('start-date').value = weekAgo;
+    document.getElementById('end-date').value = today;
+
+    function generateReport() {
+        const type = document.getElementById('report-type').value;
+        const format = document.querySelector('input[name="format"]:checked').value;
+        const startDate = document.getElementById('start-date').value;
+        const endDate = document.getElementById('end-date').value;
+
+        showToast(`Generating ${type} report in ${format.toUpperCase()} format...`);
+
+        // Simulate report generation
+        setTimeout(() => {
+            if (format === 'email') {
+                showToast('Report sent to your email');
+            } else {
+                showToast(`${type.charAt(0).toUpperCase() + type.slice(1)} report downloaded`);
+            }
+        }, 2000);
+    }
+</script>
+{% endblock %}

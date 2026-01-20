@@ -1,0 +1,178 @@
+{% extends 'barista/base.html' %}
+
+{% block title %}Update Inventory - Barista Robot Control{% endblock %}
+
+{% block content %}
+<div class="top-bar">
+    <h1 class="page-title">
+        <i class="bi bi-pencil-square me-2"></i>Update Inventory
+    </h1>
+    <a href="{% url 'inventory-dashboard' %}" class="btn btn-outline-secondary">
+        <i class="bi bi-arrow-left me-1"></i> Back
+    </a>
+</div>
+
+<div class="row">
+    <!-- Input Form -->
+    <div class="col-lg-7">
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-list me-2"></i>Inventory Items
+            </div>
+            <div class="card-body">
+                <form id="inventory-form">
+                    {% for item in inventory_items %}
+                    <div class="row align-items-center mb-3 pb-3 border-bottom" data-item-id="{{ item.id }}">
+                        <div class="col-md-5">
+                            <label class="form-label mb-0">
+                                <strong>{{ item.name }}</strong>
+                                <small class="text-muted d-block">{{ item.get_item_type_display }}</small>
+                            </label>
+                        </div>
+                        <div class="col-md-4">
+                            {% if item.item_type == 'bean' %}
+                            <div class="input-group">
+                                <input type="number" class="form-control inventory-input"
+                                       id="level-{{ item.id }}" value="{{ item.current_level|floatformat:0 }}"
+                                       min="0" max="100" step="1" onfocus="setActiveInput(this)">
+                                <span class="input-group-text">%</span>
+                            </div>
+                            {% else %}
+                            <input type="number" class="form-control inventory-input"
+                                   id="count-{{ item.id }}" value="{{ item.current_count }}"
+                                   min="0" step="1" onfocus="setActiveInput(this)">
+                            {% endif %}
+                        </div>
+                        <div class="col-md-3 text-end">
+                            {% if item.is_warning %}
+                            <span class="badge bg-danger">
+                                <i class="bi bi-exclamation-triangle"></i> Low
+                            </span>
+                            {% else %}
+                            <span class="badge bg-success">OK</span>
+                            {% endif %}
+                        </div>
+                    </div>
+                    {% empty %}
+                    <div class="text-center text-muted py-4">
+                        No inventory items to update.
+                    </div>
+                    {% endfor %}
+
+                    {% if inventory_items %}
+                    <div class="d-grid">
+                        <button type="submit" class="btn btn-primary btn-lg">
+                            <i class="bi bi-check-lg me-2"></i>Save All Changes
+                        </button>
+                    </div>
+                    {% endif %}
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Number Keypad -->
+    <div class="col-lg-5">
+        <div class="card sticky-top" style="top: 1.5rem;">
+            <div class="card-header">
+                <i class="bi bi-grid-3x3 me-2"></i>Number Pad
+            </div>
+            <div class="card-body">
+                <div class="keypad mx-auto">
+                    <button type="button" class="keypad-btn" data-value="1">1</button>
+                    <button type="button" class="keypad-btn" data-value="2">2</button>
+                    <button type="button" class="keypad-btn" data-value="3">3</button>
+                    <button type="button" class="keypad-btn" data-value="4">4</button>
+                    <button type="button" class="keypad-btn" data-value="5">5</button>
+                    <button type="button" class="keypad-btn" data-value="6">6</button>
+                    <button type="button" class="keypad-btn" data-value="7">7</button>
+                    <button type="button" class="keypad-btn" data-value="8">8</button>
+                    <button type="button" class="keypad-btn" data-value="9">9</button>
+                    <button type="button" class="keypad-btn" data-value="clear">C</button>
+                    <button type="button" class="keypad-btn" data-value="0">0</button>
+                    <button type="button" class="keypad-btn action" data-value="backspace">
+                        <i class="bi bi-backspace"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    let activeInput = null;
+
+    function setActiveInput(input) {
+        activeInput = input;
+        document.querySelectorAll('.inventory-input').forEach(inp => {
+            inp.classList.remove('border-primary');
+        });
+        input.classList.add('border-primary');
+    }
+
+    // Keypad handler
+    document.querySelectorAll('.keypad-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            if (!activeInput) return;
+
+            const value = this.dataset.value;
+
+            if (value === 'clear') {
+                activeInput.value = '';
+            } else if (value === 'backspace') {
+                activeInput.value = activeInput.value.slice(0, -1);
+            } else {
+                activeInput.value += value;
+            }
+        });
+    });
+
+    // Form submission
+    document.getElementById('inventory-form').addEventListener('submit', async function(e) {
+        e.preventDefault();
+
+        const items = [];
+
+        document.querySelectorAll('[data-item-id]').forEach(row => {
+            const id = row.dataset.itemId;
+            const levelInput = document.getElementById(`level-${id}`);
+            const countInput = document.getElementById(`count-${id}`);
+
+            const item = { id: parseInt(id) };
+
+            if (levelInput) {
+                item.current_level = parseFloat(levelInput.value) || 0;
+            }
+            if (countInput) {
+                item.current_count = parseInt(countInput.value) || 0;
+            }
+
+            items.push(item);
+        });
+
+        try {
+            const response = await fetch('/api/inventory/bulk_update/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrftoken
+                },
+                body: JSON.stringify({ items })
+            });
+
+            if (response.ok) {
+                showToast('Inventory updated successfully');
+                setTimeout(() => {
+                    window.location.href = '{% url "inventory-dashboard" %}';
+                }, 1000);
+            } else {
+                showToast('Failed to update inventory', 'error');
+            }
+        } catch (e) {
+            showToast('Failed to update inventory', 'error');
+        }
+    });
+</script>
+{% endblock %}

@@ -1,0 +1,197 @@
+{% extends 'barista/base.html' %}
+
+{% block title %}Analytics - Barista Robot Control{% endblock %}
+
+{% block extra_css %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+{% endblock %}
+
+{% block content %}
+<div class="top-bar">
+    <h1 class="page-title">
+        <i class="bi bi-bar-chart me-2"></i>Analytics
+    </h1>
+    <a href="{% url 'analytics-reports' %}" class="btn btn-outline-primary">
+        <i class="bi bi-file-earmark-text me-1"></i> Reports
+    </a>
+</div>
+
+<!-- KPI Cards -->
+<div class="row mb-4">
+    <div class="col-lg-3 col-md-6 mb-3">
+        <div class="card text-center h-100">
+            <div class="card-body">
+                <div class="text-muted mb-2">Today's Cups</div>
+                <div class="display-4 text-primary" id="today-cups">{{ today_cups }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-3 col-md-6 mb-3">
+        <div class="card text-center h-100">
+            <div class="card-body">
+                <div class="text-muted mb-2">Avg Per Hour</div>
+                <div class="display-4 text-info" id="avg-hour">-</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-3 col-md-6 mb-3">
+        <div class="card text-center h-100">
+            <div class="card-body">
+                <div class="text-muted mb-2">Peak Hour</div>
+                <div class="display-4 text-warning" id="peak-hour">-</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-3 col-md-6 mb-3">
+        <div class="card text-center h-100">
+            <div class="card-body">
+                <div class="text-muted mb-2">Top Recipe</div>
+                <div class="display-4 text-success" id="top-recipe">-</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Charts -->
+<div class="row">
+    <div class="col-lg-8 mb-4">
+        <div class="card h-100">
+            <div class="card-header">
+                <i class="bi bi-graph-up me-2"></i>Cups Over Time (Today)
+            </div>
+            <div class="card-body">
+                <canvas id="hourlyChart" height="300"></canvas>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-4 mb-4">
+        <div class="card h-100">
+            <div class="card-header">
+                <i class="bi bi-pie-chart me-2"></i>Recipe Distribution
+            </div>
+            <div class="card-body d-flex align-items-center justify-content-center">
+                <canvas id="recipeChart" height="250"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Weekly Trend -->
+<div class="card">
+    <div class="card-header">
+        <i class="bi bi-calendar3 me-2"></i>Last 7 Days
+    </div>
+    <div class="card-body">
+        <canvas id="weeklyChart" height="150"></canvas>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    let hourlyChart, recipeChart, weeklyChart;
+
+    async function loadAnalytics() {
+        try {
+            const response = await fetch('/api/analytics/');
+            const data = await response.json();
+
+            // Update KPIs
+            document.getElementById('today-cups').textContent = data.today.total_cups;
+            document.getElementById('avg-hour').textContent = data.today.avg_per_hour;
+            document.getElementById('peak-hour').textContent = data.today.peak_hour ?
+                data.today.peak_hour + ':00' : '-';
+            document.getElementById('top-recipe').textContent = data.today.top_recipe ?
+                '#' + data.today.top_recipe : '-';
+
+            // Hourly Chart
+            const hourlyLabels = [];
+            const hourlyData = [];
+            for (let i = 6; i <= 22; i++) {
+                const hour = i.toString().padStart(2, '0');
+                hourlyLabels.push(hour + ':00');
+                hourlyData.push(data.hourly[hour] || 0);
+            }
+
+            if (hourlyChart) hourlyChart.destroy();
+            hourlyChart = new Chart(document.getElementById('hourlyChart'), {
+                type: 'line',
+                data: {
+                    labels: hourlyLabels,
+                    datasets: [{
+                        label: 'Cups',
+                        data: hourlyData,
+                        borderColor: '#6f4e37',
+                        backgroundColor: 'rgba(111, 78, 55, 0.1)',
+                        fill: true,
+                        tension: 0.4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        y: { beginAtZero: true }
+                    }
+                }
+            });
+
+            // Recipe Chart
+            const recipeLabels = ['Recipe 1', 'Recipe 2', 'Recipe 3', 'Recipe 4'];
+            const recipeData = [
+                data.recipe_distribution['1'] || 0,
+                data.recipe_distribution['2'] || 0,
+                data.recipe_distribution['3'] || 0,
+                data.recipe_distribution['4'] || 0
+            ];
+
+            if (recipeChart) recipeChart.destroy();
+            recipeChart = new Chart(document.getElementById('recipeChart'), {
+                type: 'doughnut',
+                data: {
+                    labels: recipeLabels,
+                    datasets: [{
+                        data: recipeData,
+                        backgroundColor: ['#6f4e37', '#c4a484', '#d4a574', '#8b6914']
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false
+                }
+            });
+
+            // Weekly Chart
+            const weeklyLabels = data.last_7_days.map(d => d.date).reverse();
+            const weeklyData = data.last_7_days.map(d => d.total_cups).reverse();
+
+            if (weeklyChart) weeklyChart.destroy();
+            weeklyChart = new Chart(document.getElementById('weeklyChart'), {
+                type: 'bar',
+                data: {
+                    labels: weeklyLabels,
+                    datasets: [{
+                        label: 'Cups',
+                        data: weeklyData,
+                        backgroundColor: '#6f4e37'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        y: { beginAtZero: true }
+                    }
+                }
+            });
+
+        } catch (e) {
+            console.error('Failed to load analytics:', e);
+        }
+    }
+
+    loadAnalytics();
+</script>
+{% endblock %}

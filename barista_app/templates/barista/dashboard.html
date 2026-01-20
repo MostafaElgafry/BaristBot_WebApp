@@ -1,0 +1,260 @@
+{% extends 'barista/base.html' %}
+
+{% block title %}Dashboard - Barista Robot Control{% endblock %}
+
+{% block content %}
+<div class="top-bar">
+    <h1 class="page-title">
+        <i class="bi bi-speedometer2 me-2"></i>Dashboard
+    </h1>
+    <div class="status-badge {% if robot_connected %}connected{% else %}disconnected{% endif %}">
+        <span class="status-dot"></span>
+        <span>Robot {% if robot_connected %}Connected{% else %}Disconnected{% endif %}</span>
+    </div>
+</div>
+
+<!-- Welcome Card -->
+<div class="card mb-4">
+    <div class="card-body">
+        <h4 class="mb-1">Welcome back, {{ user.first_name|default:user.username }}!</h4>
+        <p class="text-muted mb-0">
+            You are logged in as <strong>{{ user.get_role_display }}</strong>.
+            {% if user.last_login %}
+            Last login: {{ user.last_login|date:"M d, Y H:i" }}
+            {% endif %}
+        </p>
+    </div>
+</div>
+
+<!-- Warnings Section -->
+{% if warnings %}
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card warning-card {% if warnings|length > 2 %}critical{% endif %}">
+            <div class="card-body">
+                <h5 class="mb-3">
+                    <i class="bi bi-exclamation-triangle-fill text-warning me-2"></i>
+                    Active Warnings ({{ warnings_count }})
+                </h5>
+                <div class="row">
+                    {% for warning in warnings %}
+                    <div class="col-md-4 mb-2">
+                        <div class="d-flex align-items-center">
+                            <i class="bi bi-exclamation-circle text-danger me-2"></i>
+                            <span><strong>{{ warning.name }}</strong> is low ({{ warning.level|floatformat:0 }}%)</span>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- Quick Stats -->
+<div class="row mb-4">
+    <div class="col-lg-3 col-md-6 mb-3">
+        <div class="stat-card">
+            <div class="stat-icon grinders">
+                <i class="bi bi-gear-fill"></i>
+            </div>
+            <div class="stat-value" id="grinders-count">-</div>
+            <div class="stat-label">Grinders Configured</div>
+        </div>
+    </div>
+    <div class="col-lg-3 col-md-6 mb-3">
+        <div class="stat-card">
+            <div class="stat-icon dozers">
+                <i class="bi bi-funnel-fill"></i>
+            </div>
+            <div class="stat-value" id="dozers-count">-</div>
+            <div class="stat-label">Dozers Configured</div>
+        </div>
+    </div>
+    <div class="col-lg-3 col-md-6 mb-3">
+        <div class="stat-card">
+            <div class="stat-icon tone">
+                <i class="bi bi-grid-3x3-gap-fill"></i>
+            </div>
+            <div class="stat-value">4</div>
+            <div class="stat-label">Tone Machine Buttons</div>
+        </div>
+    </div>
+    <div class="col-lg-3 col-md-6 mb-3">
+        <a href="{% url 'manual-order' %}" class="text-decoration-none">
+            <div class="stat-card">
+                <div class="stat-icon" style="background: #fff3cd; color: #856404;">
+                    <i class="bi bi-send-fill"></i>
+                </div>
+                <div class="stat-value text-dark">Send</div>
+                <div class="stat-label">Manual Order</div>
+            </div>
+        </a>
+    </div>
+</div>
+
+<!-- System Status & Recent Activity -->
+<div class="row">
+    <div class="col-lg-4 mb-4">
+        <div class="card h-100">
+            <div class="card-header">
+                <i class="bi bi-info-circle me-2"></i>System Status
+            </div>
+            <div class="card-body">
+                <ul class="list-unstyled mb-0">
+                    <li class="d-flex justify-content-between py-2 border-bottom">
+                        <span class="text-muted">Last Backup</span>
+                        <strong>
+                            {% if last_backup %}
+                            {{ last_backup.created_at|date:"M d, H:i" }}
+                            {% else %}
+                            Never
+                            {% endif %}
+                        </strong>
+                    </li>
+                    <li class="d-flex justify-content-between py-2 border-bottom">
+                        <span class="text-muted">Active Warnings</span>
+                        <strong class="{% if warnings_count %}text-danger{% else %}text-success{% endif %}">
+                            {{ warnings_count }}
+                        </strong>
+                    </li>
+                    <li class="d-flex justify-content-between py-2 border-bottom">
+                        <span class="text-muted">Robot Status</span>
+                        <strong class="{% if robot_connected %}text-success{% else %}text-danger{% endif %}">
+                            {% if robot_connected %}Online{% else %}Offline{% endif %}
+                        </strong>
+                    </li>
+                    <li class="d-flex justify-content-between py-2">
+                        <span class="text-muted">Current Time</span>
+                        <strong id="current-time">--:--</strong>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-8 mb-4">
+        <div class="card h-100">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-activity me-2"></i>Recent Activity</span>
+                <span class="badge bg-secondary">Last 10</span>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead>
+                            <tr>
+                                <th>Action</th>
+                                <th>Description</th>
+                                <th>User</th>
+                                <th>Time</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for activity in recent_activity %}
+                            <tr>
+                                <td>
+                                    <span class="badge
+                                        {% if 'login' in activity.action_type %}bg-info
+                                        {% elif 'logout' in activity.action_type %}bg-secondary
+                                        {% elif 'completed' in activity.action_type %}bg-success
+                                        {% elif 'failed' in activity.action_type %}bg-danger
+                                        {% elif 'warning' in activity.action_type %}bg-warning text-dark
+                                        {% else %}bg-primary{% endif %}">
+                                        {{ activity.get_action_type_display }}
+                                    </span>
+                                </td>
+                                <td class="text-truncate" style="max-width: 250px;">
+                                    {{ activity.description }}
+                                </td>
+                                <td>{{ activity.user.username|default:"-" }}</td>
+                                <td class="text-muted">{{ activity.created_at|timesince }} ago</td>
+                            </tr>
+                            {% empty %}
+                            <tr>
+                                <td colspan="4" class="text-center text-muted py-4">
+                                    No recent activity
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Quick Actions -->
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-lightning me-2"></i>Quick Actions
+            </div>
+            <div class="card-body">
+                <div class="row g-3">
+                    <div class="col-md-3 col-6">
+                        <a href="{% url 'equipment-overview' %}" class="btn btn-outline-primary w-100 py-3">
+                            <i class="bi bi-gear d-block mb-2" style="font-size: 1.5rem;"></i>
+                            Configure Equipment
+                        </a>
+                    </div>
+                    <div class="col-md-3 col-6">
+                        <a href="{% url 'inventory-update' %}" class="btn btn-outline-primary w-100 py-3">
+                            <i class="bi bi-box-seam d-block mb-2" style="font-size: 1.5rem;"></i>
+                            Update Inventory
+                        </a>
+                    </div>
+                    <div class="col-md-3 col-6">
+                        <a href="{% url 'configurations-list' %}" class="btn btn-outline-primary w-100 py-3">
+                            <i class="bi bi-save d-block mb-2" style="font-size: 1.5rem;"></i>
+                            Save Configuration
+                        </a>
+                    </div>
+                    <div class="col-md-3 col-6">
+                        <a href="{% url 'analytics-overview' %}" class="btn btn-outline-primary w-100 py-3">
+                            <i class="bi bi-bar-chart d-block mb-2" style="font-size: 1.5rem;"></i>
+                            View Analytics
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // Update current time
+    function updateTime() {
+        const now = new Date();
+        document.getElementById('current-time').textContent = now.toLocaleTimeString('en-US', {
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false
+        });
+    }
+    updateTime();
+    setInterval(updateTime, 1000);
+
+    // Load dashboard stats
+    async function loadStats() {
+        try {
+            const [grinders, dozers] = await Promise.all([
+                fetch('/api/grinders/').then(r => r.json()),
+                fetch('/api/dozers/').then(r => r.json())
+            ]);
+
+            document.getElementById('grinders-count').textContent = grinders.length || 0;
+            document.getElementById('dozers-count').textContent = dozers.length || 0;
+        } catch (e) {
+            console.error('Failed to load stats:', e);
+        }
+    }
+
+    loadStats();
+</script>
+{% endblock %}

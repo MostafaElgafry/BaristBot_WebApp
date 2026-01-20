@@ -1,0 +1,360 @@
+{% extends 'barista/base.html' %}
+
+{% block title %}Manual Order - Barista Robot Control{% endblock %}
+
+{% block content %}
+<div class="top-bar">
+    <h1 class="page-title">
+        <i class="bi bi-send me-2"></i>Manual Order
+    </h1>
+    <div class="status-badge {% if robot_connected %}connected{% else %}disconnected{% endif %}">
+        <span class="status-dot"></span>
+        <span>Robot {% if robot_connected %}Connected{% else %}Disconnected{% endif %}</span>
+    </div>
+</div>
+
+<div class="row">
+    <!-- Order Form -->
+    <div class="col-lg-7">
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-cup-hot me-2"></i>Create Order
+            </div>
+            <div class="card-body">
+                <form id="order-form">
+                    <!-- Dose Input -->
+                    <div class="mb-4">
+                        <label class="form-label fw-bold">Dose (grams)</label>
+                        <div class="input-group input-group-lg mb-2">
+                            <input type="number" class="form-control" id="dose-input"
+                                   value="18.0" min="0.1" max="200" step="0.1"
+                                   onfocus="setActiveInput(this)" required>
+                            <span class="input-group-text">g</span>
+                        </div>
+                        <div class="btn-group w-100" role="group">
+                            <button type="button" class="btn btn-outline-secondary" onclick="setDose(16)">16g</button>
+                            <button type="button" class="btn btn-outline-secondary" onclick="setDose(18)">18g</button>
+                            <button type="button" class="btn btn-outline-secondary" onclick="setDose(20)">20g</button>
+                            <button type="button" class="btn btn-outline-secondary" onclick="setDose(22)">22g</button>
+                        </div>
+                    </div>
+
+                    <!-- Grind Grade -->
+                    <div class="mb-4">
+                        <label class="form-label fw-bold">Grind Grade</label>
+                        <div class="d-flex align-items-center gap-3">
+                            <button type="button" class="btn btn-outline-primary btn-lg" onclick="adjustGrade(-1)">
+                                <i class="bi bi-dash-lg"></i>
+                            </button>
+                            <div class="text-center flex-grow-1">
+                                <div class="display-4" id="grade-display">5</div>
+                                <small class="text-muted">1 (Fine) to 10 (Coarse)</small>
+                            </div>
+                            <button type="button" class="btn btn-outline-primary btn-lg" onclick="adjustGrade(1)">
+                                <i class="bi bi-plus-lg"></i>
+                            </button>
+                        </div>
+                        <input type="hidden" id="grade-input" value="5">
+                    </div>
+
+                    <!-- Recipe Number -->
+                    <div class="mb-4">
+                        <label class="form-label fw-bold">Recipe Number</label>
+                        <div class="row g-2">
+                            <div class="col-3">
+                                <button type="button" class="btn btn-outline-primary btn-lg w-100 py-4 recipe-btn active" data-recipe="1">
+                                    <div class="display-6">1</div>
+                                </button>
+                            </div>
+                            <div class="col-3">
+                                <button type="button" class="btn btn-outline-primary btn-lg w-100 py-4 recipe-btn" data-recipe="2">
+                                    <div class="display-6">2</div>
+                                </button>
+                            </div>
+                            <div class="col-3">
+                                <button type="button" class="btn btn-outline-primary btn-lg w-100 py-4 recipe-btn" data-recipe="3">
+                                    <div class="display-6">3</div>
+                                </button>
+                            </div>
+                            <div class="col-3">
+                                <button type="button" class="btn btn-outline-primary btn-lg w-100 py-4 recipe-btn" data-recipe="4">
+                                    <div class="display-6">4</div>
+                                </button>
+                            </div>
+                        </div>
+                        <input type="hidden" id="recipe-input" value="1">
+                    </div>
+
+                    <!-- Action Buttons -->
+                    <div class="d-flex gap-2">
+                        <button type="submit" class="btn btn-primary btn-lg flex-grow-1" id="send-btn"
+                                {% if not robot_connected %}disabled{% endif %}>
+                            <i class="bi bi-send-fill me-2"></i>Send Order
+                        </button>
+                        <button type="button" class="btn btn-outline-secondary btn-lg" onclick="resetForm()">
+                            <i class="bi bi-arrow-counterclockwise"></i> Reset
+                        </button>
+                    </div>
+
+                    {% if not robot_connected %}
+                    <div class="alert alert-danger mt-3 mb-0">
+                        <i class="bi bi-exclamation-triangle me-2"></i>
+                        Robot is not connected. Cannot send orders.
+                    </div>
+                    {% endif %}
+                </form>
+            </div>
+        </div>
+
+        <!-- Last Result -->
+        <div class="card mt-3" id="result-card" style="display: none;">
+            <div class="card-body" id="result-body">
+                <!-- Result will be shown here -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Number Keypad & Recent Orders -->
+    <div class="col-lg-5">
+        <!-- Number Keypad -->
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-grid-3x3 me-2"></i>Number Pad
+            </div>
+            <div class="card-body">
+                <div class="keypad mx-auto">
+                    <button type="button" class="keypad-btn" data-value="1">1</button>
+                    <button type="button" class="keypad-btn" data-value="2">2</button>
+                    <button type="button" class="keypad-btn" data-value="3">3</button>
+                    <button type="button" class="keypad-btn" data-value="4">4</button>
+                    <button type="button" class="keypad-btn" data-value="5">5</button>
+                    <button type="button" class="keypad-btn" data-value="6">6</button>
+                    <button type="button" class="keypad-btn" data-value="7">7</button>
+                    <button type="button" class="keypad-btn" data-value="8">8</button>
+                    <button type="button" class="keypad-btn" data-value="9">9</button>
+                    <button type="button" class="keypad-btn" data-value=".">.</button>
+                    <button type="button" class="keypad-btn" data-value="0">0</button>
+                    <button type="button" class="keypad-btn action" data-value="backspace">
+                        <i class="bi bi-backspace"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Recent Orders -->
+        <div class="card mt-3">
+            <div class="card-header">
+                <i class="bi bi-clock-history me-2"></i>Recent Orders
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-sm mb-0">
+                        <thead>
+                            <tr>
+                                <th>Time</th>
+                                <th>Dose</th>
+                                <th>Grade</th>
+                                <th>Recipe</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="recent-orders">
+                            {% for order in recent_orders %}
+                            <tr>
+                                <td>{{ order.created_at|time:"H:i" }}</td>
+                                <td>{{ order.dose_grams }}g</td>
+                                <td>{{ order.grind_grade }}</td>
+                                <td>#{{ order.recipe_number }}</td>
+                                <td>
+                                    {% if order.status == 'ack' %}
+                                    <span class="badge bg-success">ACK</span>
+                                    {% elif order.status == 'error' %}
+                                    <span class="badge bg-danger">ERR</span>
+                                    {% else %}
+                                    <span class="badge bg-secondary">{{ order.status }}</span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% empty %}
+                            <tr>
+                                <td colspan="5" class="text-center text-muted py-3">
+                                    No recent orders
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Confirmation Modal -->
+<div class="modal fade" id="confirmModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Confirm Order</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p>Are you sure you want to send this order to the robot?</p>
+                <ul class="list-unstyled">
+                    <li><strong>Dose:</strong> <span id="confirm-dose"></span>g</li>
+                    <li><strong>Grind Grade:</strong> <span id="confirm-grade"></span></li>
+                    <li><strong>Recipe:</strong> #<span id="confirm-recipe"></span></li>
+                </ul>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" id="confirm-send-btn">
+                    <i class="bi bi-send-fill me-1"></i>Send
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    let activeInput = null;
+    let currentGrade = 5;
+    let currentRecipe = 1;
+
+    function setActiveInput(input) {
+        activeInput = input;
+    }
+
+    function setDose(value) {
+        document.getElementById('dose-input').value = value;
+    }
+
+    function adjustGrade(delta) {
+        currentGrade = Math.min(10, Math.max(1, currentGrade + delta));
+        document.getElementById('grade-display').textContent = currentGrade;
+        document.getElementById('grade-input').value = currentGrade;
+    }
+
+    // Recipe buttons
+    document.querySelectorAll('.recipe-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            document.querySelectorAll('.recipe-btn').forEach(b => b.classList.remove('active'));
+            this.classList.add('active');
+            currentRecipe = parseInt(this.dataset.recipe);
+            document.getElementById('recipe-input').value = currentRecipe;
+        });
+    });
+
+    // Keypad handler
+    document.querySelectorAll('.keypad-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            if (!activeInput) {
+                activeInput = document.getElementById('dose-input');
+            }
+
+            const value = this.dataset.value;
+
+            if (value === 'backspace') {
+                activeInput.value = activeInput.value.slice(0, -1);
+            } else {
+                activeInput.value += value;
+            }
+        });
+    });
+
+    function resetForm() {
+        document.getElementById('dose-input').value = '18.0';
+        currentGrade = 5;
+        document.getElementById('grade-display').textContent = '5';
+        document.getElementById('grade-input').value = '5';
+        document.querySelectorAll('.recipe-btn').forEach(b => b.classList.remove('active'));
+        document.querySelector('[data-recipe="1"]').classList.add('active');
+        currentRecipe = 1;
+        document.getElementById('recipe-input').value = '1';
+        document.getElementById('result-card').style.display = 'none';
+    }
+
+    // Form submission with confirmation
+    document.getElementById('order-form').addEventListener('submit', function(e) {
+        e.preventDefault();
+
+        const dose = parseFloat(document.getElementById('dose-input').value);
+        const grade = currentGrade;
+        const recipe = currentRecipe;
+
+        document.getElementById('confirm-dose').textContent = dose;
+        document.getElementById('confirm-grade').textContent = grade;
+        document.getElementById('confirm-recipe').textContent = recipe;
+
+        const modal = new bootstrap.Modal(document.getElementById('confirmModal'));
+        modal.show();
+    });
+
+    // Confirm send
+    document.getElementById('confirm-send-btn').addEventListener('click', async function() {
+        const dose = parseFloat(document.getElementById('dose-input').value);
+        const grade = currentGrade;
+        const recipe = currentRecipe;
+
+        // Close modal
+        bootstrap.Modal.getInstance(document.getElementById('confirmModal')).hide();
+
+        // Disable send button
+        const sendBtn = document.getElementById('send-btn');
+        sendBtn.disabled = true;
+        sendBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Sending...';
+
+        try {
+            const response = await fetch('/api/orders/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrftoken
+                },
+                body: JSON.stringify({
+                    dose_grams: dose,
+                    grind_grade: grade,
+                    recipe_number: recipe
+                })
+            });
+
+            const result = await response.json();
+
+            // Show result
+            const resultCard = document.getElementById('result-card');
+            const resultBody = document.getElementById('result-body');
+
+            if (result.status === 'ack') {
+                resultBody.innerHTML = `
+                    <div class="alert alert-success mb-0">
+                        <i class="bi bi-check-circle-fill me-2"></i>
+                        <strong>Order sent successfully!</strong>
+                        <div class="mt-2">Response: ${result.response_message}</div>
+                    </div>
+                `;
+            } else {
+                resultBody.innerHTML = `
+                    <div class="alert alert-danger mb-0">
+                        <i class="bi bi-x-circle-fill me-2"></i>
+                        <strong>Order failed!</strong>
+                        <div class="mt-2">Error: ${result.response_message}</div>
+                    </div>
+                `;
+            }
+
+            resultCard.style.display = 'block';
+
+            // Refresh recent orders
+            location.reload();
+
+        } catch (e) {
+            showToast('Failed to send order', 'error');
+        } finally {
+            sendBtn.disabled = false;
+            sendBtn.innerHTML = '<i class="bi bi-send-fill me-2"></i>Send Order';
+        }
+    });
+</script>
+{% endblock %}

@@ -1,0 +1,191 @@
+{% extends 'barista/base.html' %}
+
+{% block title %}Warning Settings - Barista Robot Control{% endblock %}
+
+{% block content %}
+<div class="top-bar">
+    <h1 class="page-title">
+        <i class="bi bi-exclamation-triangle me-2"></i>Warning Thresholds
+    </h1>
+    <a href="{% url 'inventory-dashboard' %}" class="btn btn-outline-secondary">
+        <i class="bi bi-arrow-left me-1"></i> Back
+    </a>
+</div>
+
+<div class="row">
+    <!-- Threshold Settings -->
+    <div class="col-lg-7">
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-sliders me-2"></i>Threshold Settings
+            </div>
+            <div class="card-body">
+                <p class="text-muted mb-4">
+                    Set the percentage/count at which warnings will be displayed for each inventory item.
+                </p>
+
+                <form id="threshold-form">
+                    {% for item in inventory_items %}
+                    <div class="row align-items-center mb-3 pb-3 border-bottom">
+                        <div class="col-md-5">
+                            <label class="form-label mb-0">
+                                <strong>{{ item.name }}</strong>
+                                <small class="text-muted d-block">{{ item.get_item_type_display }}</small>
+                            </label>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="input-group">
+                                <input type="number" class="form-control threshold-input"
+                                       id="threshold-{{ item.id }}"
+                                       data-item-id="{{ item.id }}"
+                                       value="{{ item.warning_threshold|floatformat:0 }}"
+                                       min="0" max="100" step="1"
+                                       onfocus="setActiveInput(this)">
+                                <span class="input-group-text">%</span>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <small class="text-muted">
+                                Current: {{ item.current_level|floatformat:0 }}%
+                            </small>
+                        </div>
+                    </div>
+                    {% empty %}
+                    <div class="text-center text-muted py-4">
+                        No inventory items configured.
+                    </div>
+                    {% endfor %}
+
+                    {% if inventory_items %}
+                    <div class="d-grid">
+                        <button type="submit" class="btn btn-primary btn-lg">
+                            <i class="bi bi-check-lg me-2"></i>Apply Thresholds
+                        </button>
+                    </div>
+                    {% endif %}
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Number Keypad -->
+    <div class="col-lg-5">
+        <div class="card sticky-top" style="top: 1.5rem;">
+            <div class="card-header">
+                <i class="bi bi-grid-3x3 me-2"></i>Number Pad
+            </div>
+            <div class="card-body">
+                <div class="keypad mx-auto">
+                    <button type="button" class="keypad-btn" data-value="1">1</button>
+                    <button type="button" class="keypad-btn" data-value="2">2</button>
+                    <button type="button" class="keypad-btn" data-value="3">3</button>
+                    <button type="button" class="keypad-btn" data-value="4">4</button>
+                    <button type="button" class="keypad-btn" data-value="5">5</button>
+                    <button type="button" class="keypad-btn" data-value="6">6</button>
+                    <button type="button" class="keypad-btn" data-value="7">7</button>
+                    <button type="button" class="keypad-btn" data-value="8">8</button>
+                    <button type="button" class="keypad-btn" data-value="9">9</button>
+                    <button type="button" class="keypad-btn" data-value="clear">C</button>
+                    <button type="button" class="keypad-btn" data-value="0">0</button>
+                    <button type="button" class="keypad-btn action" data-value="backspace">
+                        <i class="bi bi-backspace"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Common Presets -->
+        <div class="card mt-3">
+            <div class="card-header">
+                <i class="bi bi-lightning me-2"></i>Quick Presets
+            </div>
+            <div class="card-body">
+                <div class="d-grid gap-2">
+                    <button class="btn btn-outline-secondary" onclick="setAllThresholds(10)">
+                        Set All to 10%
+                    </button>
+                    <button class="btn btn-outline-secondary" onclick="setAllThresholds(20)">
+                        Set All to 20%
+                    </button>
+                    <button class="btn btn-outline-secondary" onclick="setAllThresholds(30)">
+                        Set All to 30%
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    let activeInput = null;
+
+    function setActiveInput(input) {
+        activeInput = input;
+        document.querySelectorAll('.threshold-input').forEach(inp => {
+            inp.classList.remove('border-primary');
+        });
+        input.classList.add('border-primary');
+    }
+
+    function setAllThresholds(value) {
+        document.querySelectorAll('.threshold-input').forEach(input => {
+            input.value = value;
+        });
+    }
+
+    // Keypad handler
+    document.querySelectorAll('.keypad-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            if (!activeInput) return;
+
+            const value = this.dataset.value;
+
+            if (value === 'clear') {
+                activeInput.value = '';
+            } else if (value === 'backspace') {
+                activeInput.value = activeInput.value.slice(0, -1);
+            } else {
+                activeInput.value += value;
+            }
+        });
+    });
+
+    // Form submission
+    document.getElementById('threshold-form').addEventListener('submit', async function(e) {
+        e.preventDefault();
+
+        const items = [];
+
+        document.querySelectorAll('.threshold-input').forEach(input => {
+            items.push({
+                id: parseInt(input.dataset.itemId),
+                warning_threshold: parseFloat(input.value) || 20
+            });
+        });
+
+        try {
+            const response = await fetch('/api/inventory/bulk_update/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrftoken
+                },
+                body: JSON.stringify({ items })
+            });
+
+            if (response.ok) {
+                showToast('Thresholds updated successfully');
+                setTimeout(() => {
+                    window.location.href = '{% url "inventory-dashboard" %}';
+                }, 1000);
+            } else {
+                showToast('Failed to update thresholds', 'error');
+            }
+        } catch (e) {
+            showToast('Failed to update thresholds', 'error');
+        }
+    });
+</script>
+{% endblock %}

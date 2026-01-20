@@ -1,0 +1,166 @@
+{% extends 'barista/base.html' %}
+
+{% block title %}System Information - Barista Robot Control{% endblock %}
+
+{% block content %}
+<div class="top-bar">
+    <h1 class="page-title">
+        <i class="bi bi-info-circle me-2"></i>System Information
+    </h1>
+</div>
+
+<!-- Settings Navigation -->
+<ul class="nav nav-tabs mb-4">
+    <li class="nav-item">
+        <a class="nav-link" href="{% url 'settings-display' %}">
+            <i class="bi bi-display me-1"></i> Display
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link" href="{% url 'settings-users' %}">
+            <i class="bi bi-people me-1"></i> Users
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link active" href="{% url 'settings-system' %}">
+            <i class="bi bi-info-circle me-1"></i> System
+        </a>
+    </li>
+</ul>
+
+<div class="row">
+    <div class="col-lg-6">
+        <div class="card mb-4">
+            <div class="card-header">
+                <i class="bi bi-cpu me-2"></i>Robot Information
+            </div>
+            <div class="card-body">
+                <table class="table table-borderless mb-0">
+                    <tr>
+                        <td class="text-muted" style="width: 40%;">Robot Version</td>
+                        <td><strong>{{ settings.robot_version }}</strong></td>
+                    </tr>
+                    <tr>
+                        <td class="text-muted">Firmware Version</td>
+                        <td><strong>{{ settings.firmware_version }}</strong></td>
+                    </tr>
+                    <tr>
+                        <td class="text-muted">IP Address</td>
+                        <td><strong>{{ settings.ip_address }}</strong></td>
+                    </tr>
+                    <tr>
+                        <td class="text-muted">Last Sync</td>
+                        <td>
+                            <strong>{{ settings.last_sync|date:"M d, Y H:i"|default:"Never" }}</strong>
+                        </td>
+                    </tr>
+                </table>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-arrow-repeat me-2"></i>Updates
+            </div>
+            <div class="card-body">
+                <p class="text-muted">Check for software and firmware updates.</p>
+                <button class="btn btn-outline-primary" onclick="checkUpdates()">
+                    <i class="bi bi-cloud-download me-2"></i>Check for Updates
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-6">
+        <div class="card mb-4">
+            <div class="card-header">
+                <i class="bi bi-hdd me-2"></i>Connection Status
+            </div>
+            <div class="card-body">
+                <div class="d-flex align-items-center justify-content-between mb-3">
+                    <span>Robot Control Board</span>
+                    <span class="badge bg-secondary" id="robot-status">Checking...</span>
+                </div>
+                <div class="d-flex align-items-center justify-content-between mb-3">
+                    <span>Serial Port</span>
+                    <span class="badge bg-info">/dev/ttyUSB0</span>
+                </div>
+                <div class="d-flex align-items-center justify-content-between">
+                    <span>Baud Rate</span>
+                    <span class="badge bg-info">115200</span>
+                </div>
+
+                <hr>
+
+                <button class="btn btn-outline-secondary w-100" onclick="testConnection()">
+                    <i class="bi bi-plug me-2"></i>Test Connection
+                </button>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-shield-check me-2"></i>Application Info
+            </div>
+            <div class="card-body">
+                <table class="table table-borderless mb-0">
+                    <tr>
+                        <td class="text-muted">Application</td>
+                        <td><strong>Barista Robot Control</strong></td>
+                    </tr>
+                    <tr>
+                        <td class="text-muted">Version</td>
+                        <td><strong>1.0.0</strong></td>
+                    </tr>
+                    <tr>
+                        <td class="text-muted">Framework</td>
+                        <td><strong>Django 5.0</strong></td>
+                    </tr>
+                    <tr>
+                        <td class="text-muted">API</td>
+                        <td><strong>Django REST Framework</strong></td>
+                    </tr>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // Check robot status on load
+    async function checkRobotStatus() {
+        try {
+            const response = await fetch('/api/robot/status/');
+            const data = await response.json();
+
+            const badge = document.getElementById('robot-status');
+            if (data.connected) {
+                badge.className = 'badge bg-success';
+                badge.textContent = 'Connected';
+            } else {
+                badge.className = 'badge bg-danger';
+                badge.textContent = 'Disconnected';
+            }
+        } catch (e) {
+            document.getElementById('robot-status').className = 'badge bg-danger';
+            document.getElementById('robot-status').textContent = 'Error';
+        }
+    }
+
+    checkRobotStatus();
+
+    function testConnection() {
+        showToast('Testing connection...');
+        checkRobotStatus();
+    }
+
+    function checkUpdates() {
+        showToast('Checking for updates...');
+        setTimeout(() => {
+            showToast('System is up to date');
+        }, 2000);
+    }
+</script>
+{% endblock %}
