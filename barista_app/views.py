@@ -256,7 +256,7 @@ def settings_system(request):
     # Get robot connection settings
     serial_port = getattr(django_settings, 'ROBOT_SERIAL_PORT', 'COM7')
     baud_rate = getattr(django_settings, 'ROBOT_BAUDRATE', 115200)
-    demo_mode = getattr(django_settings, 'ROBOT_DEMO_MODE', True)
+    demo_mode = getattr(django_settings, 'ROBOT_DEMO_MODE', False)
 
     return render(request, 'barista/settings/system.html', {
         'settings': system_settings,

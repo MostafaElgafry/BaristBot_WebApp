@@ -439,7 +439,7 @@ _robot_lock = threading.Lock()
 def is_demo_mode() -> bool:
     """Check if running in demo mode (no physical robot)."""
     from django.conf import settings
-    return getattr(settings, 'ROBOT_DEMO_MODE', True)
+    return getattr(settings, 'ROBOT_DEMO_MODE', False)
 
 
 def get_robot_client() -> RobotControlBoardSerialClient:
