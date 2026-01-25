@@ -31,7 +31,7 @@ class SerialProtocolError(Exception):
 @dataclass(frozen=True)
 class JobCommand:
     """Immutable value-object representing one drink job."""
-    dose_g: float       # 0.1 – 200.0 g
+    dose_g: int         # 1 – 200 g
     grind_grade: int    # 1 – 10
     recipe_no: int      # 1 – 4
 
@@ -41,8 +41,8 @@ class RobotControlBoardSerialClient:
     Thread-safe serial interface to the Robot Control Board.
     """
 
-    _MIN_DOSE, _MAX_DOSE = 0.1, 200.0
-    _MIN_GRADE, _MAX_GRADE = 1, 10
+    _MIN_DOSE, _MAX_DOSE = 1, 100
+    _MIN_GRADE, _MAX_GRADE = 1, 11
     _MIN_RECIPE, _MAX_RECIPE = 1, 4
 
     def __init__(
@@ -163,7 +163,7 @@ class RobotControlBoardSerialClient:
             raise ValueError(f"recipe_no must be {self._MIN_RECIPE}–{self._MAX_RECIPE}")
 
     def _format_job_line(self, cmd: JobCommand) -> bytes:
-        line = f"JOB,{cmd.dose_g:.2f},{cmd.grind_grade},{cmd.recipe_no}"
+        line = f"JOB,{cmd.dose_g},{cmd.grind_grade},{cmd.recipe_no}"
         return line.encode("ascii") + self._newline
 
     def _read_response(self, timeout: float = None) -> Optional[bytes]:
@@ -239,7 +239,7 @@ class RobotControlBoardSerialClient:
         logger.warning(f"[WARNING] Timeout reached, no data received")
         return None
 
-    def send_job(self, dose_g: float, grind_grade: int, recipe_no: int) -> str:
+    def send_job(self, dose_g: int, grind_grade: int, recipe_no: int) -> str:
         """
         Send a drink job to the robot board.
         Returns 'ACK' on success, raises SerialProtocolError on failure.
@@ -488,7 +488,7 @@ def get_robot_client() -> RobotControlBoardSerialClient:
         return _robot_client
 
 
-def send_manual_order(dose_g: float, grind_grade: int, recipe_no: int) -> tuple[bool, str]:
+def send_manual_order(dose_g: int, grind_grade: int, recipe_no: int) -> tuple[bool, str]:
     """
     Send a manual order to the robot.
     Returns (success: bool, message: str)

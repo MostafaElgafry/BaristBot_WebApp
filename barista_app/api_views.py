@@ -306,7 +306,7 @@ class ManualOrderViewSet(viewsets.ModelViewSet):
 
         # Send to robot
         success, message = send_manual_order(
-            order.dose_grams,
+            int(order.dose_grams),
             order.grind_grade,
             order.recipe_number
         )
