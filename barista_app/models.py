@@ -210,11 +210,16 @@ class ManualOrder(models.Model):
         ('error', 'Error'),
     ]
 
-    dose_grams = models.FloatField(
-        validators=[MinValueValidator(0.1), MaxValueValidator(200.0)]
+    dose_grams = models.IntegerField(
+        validators=[MinValueValidator(1), MaxValueValidator(200)]
     )
     grind_grade = models.IntegerField(
-        validators=[MinValueValidator(1), MaxValueValidator(10)]
+        validators=[MinValueValidator(1), MaxValueValidator(11)]
+    )
+    doser_number = models.IntegerField(
+        validators=[MinValueValidator(1), MaxValueValidator(4)],
+        default=1,
+        help_text="Doser number (1-4)"
     )
     recipe_number = models.IntegerField(
         validators=[MinValueValidator(1), MaxValueValidator(4)]

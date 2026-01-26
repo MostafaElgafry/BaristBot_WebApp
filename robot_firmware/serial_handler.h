@@ -15,8 +15,9 @@ extern "C" {
 // ============================================================================
 
 typedef struct {
-    float dose_grams;      // 0.1 - 200.0 grams
-    int grind_grade;       // 1 - 10
+    int dose_grams;        // 1 - 200 grams (integer)
+    int grind_grade;       // 1 - 11
+    int doser_number;      // 1 - 4
     int recipe_number;     // 1 - 4
     int is_valid;
 } JobCommand;

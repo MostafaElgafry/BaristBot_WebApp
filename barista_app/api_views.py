@@ -299,6 +299,7 @@ class ManualOrderViewSet(viewsets.ModelViewSet):
         order = ManualOrder.objects.create(
             dose_grams=serializer.validated_data['dose_grams'],
             grind_grade=serializer.validated_data['grind_grade'],
+            doser_number=serializer.validated_data.get('doser_number', 1),
             recipe_number=serializer.validated_data['recipe_number'],
             status='pending',
             created_by=request.user
@@ -308,20 +309,22 @@ class ManualOrderViewSet(viewsets.ModelViewSet):
         success, message = send_manual_order(
             int(order.dose_grams),
             order.grind_grade,
+            order.doser_number,
             order.recipe_number
         )
 
         if success:
-            order.status = 'processing'
+            order.status = 'ack'
             order.response_message = message
             ActivityLog.objects.create(
-                action_type='order_processing',
-                description=f"Manual order #{order.id} sent - robot processing",
+                action_type='order_sent',
+                description=f"Manual order #{order.id} acknowledged by robot",
                 user=request.user,
                 metadata={
                     'order_id': order.id,
                     'dose': order.dose_grams,
                     'grind_grade': order.grind_grade,
+                    'doser_number': order.doser_number,
                     'recipe': order.recipe_number
                 }
             )

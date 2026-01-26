@@ -143,20 +143,25 @@ class ManualOrderSerializer(serializers.ModelSerializer):
     class Meta:
         model = ManualOrder
         fields = [
-            'id', 'dose_grams', 'grind_grade', 'recipe_number',
+            'id', 'dose_grams', 'grind_grade', 'doser_number', 'recipe_number',
             'status', 'status_display', 'response_message',
             'created_by', 'created_by_username', 'created_at'
         ]
         read_only_fields = ['id', 'status', 'response_message', 'created_by', 'created_at']
 
     def validate_dose_grams(self, value):
-        if not 0.1 <= value <= 200.0:
-            raise serializers.ValidationError("Dose must be between 0.1 and 200.0 grams")
-        return value
+        if not 1 <= value <= 200:
+            raise serializers.ValidationError("Dose must be between 1 and 200 grams")
+        return int(value)
 
     def validate_grind_grade(self, value):
-        if not 1 <= value <= 10:
-            raise serializers.ValidationError("Grind grade must be between 1 and 10")
+        if not 1 <= value <= 11:
+            raise serializers.ValidationError("Grind grade must be between 1 and 11")
+        return value
+
+    def validate_doser_number(self, value):
+        if not 1 <= value <= 4:
+            raise serializers.ValidationError("Doser number must be between 1 and 4")
         return value
 
     def validate_recipe_number(self, value):

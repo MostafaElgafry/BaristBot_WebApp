@@ -32,7 +32,8 @@ class SerialProtocolError(Exception):
 class JobCommand:
     """Immutable value-object representing one drink job."""
     dose_g: int         # 1 – 200 g
-    grind_grade: int    # 1 – 10
+    grind_grade: int    # 1 – 11
+    doser_no: int       # 1 – 4
     recipe_no: int      # 1 – 4
 
 
@@ -43,6 +44,7 @@ class RobotControlBoardSerialClient:
 
     _MIN_DOSE, _MAX_DOSE = 1, 100
     _MIN_GRADE, _MAX_GRADE = 1, 11
+    _MIN_DOSER, _MAX_DOSER = 1, 4
     _MIN_RECIPE, _MAX_RECIPE = 1, 4
 
     def __init__(
@@ -154,16 +156,18 @@ class RobotControlBoardSerialClient:
             raise SerialNotConnectedError("Serial port not connected")
         logger.debug(f"[DEBUG] Serial connection verified OK")
 
-    def _validate_job(self, dose_g: float, grind_grade: int, recipe_no: int) -> None:
+    def _validate_job(self, dose_g: float, grind_grade: int, doser_no: int, recipe_no: int) -> None:
         if not (self._MIN_DOSE <= dose_g <= self._MAX_DOSE):
             raise ValueError(f"dose_g must be {self._MIN_DOSE}–{self._MAX_DOSE}")
         if not (self._MIN_GRADE <= grind_grade <= self._MAX_GRADE):
             raise ValueError(f"grind_grade must be {self._MIN_GRADE}–{self._MAX_GRADE}")
+        if not (self._MIN_DOSER <= doser_no <= self._MAX_DOSER):
+            raise ValueError(f"doser_no must be {self._MIN_DOSER}–{self._MAX_DOSER}")
         if not (self._MIN_RECIPE <= recipe_no <= self._MAX_RECIPE):
             raise ValueError(f"recipe_no must be {self._MIN_RECIPE}–{self._MAX_RECIPE}")
 
     def _format_job_line(self, cmd: JobCommand) -> bytes:
-        line = f"JOB,{cmd.dose_g},{cmd.grind_grade},{cmd.recipe_no}"
+        line = f"JOB,{cmd.dose_g},{cmd.grind_grade},{cmd.doser_no},{cmd.recipe_no}"
         return line.encode("ascii") + self._newline
 
     def _read_response(self, timeout: float = None) -> Optional[bytes]:
@@ -239,17 +243,17 @@ class RobotControlBoardSerialClient:
         logger.warning(f"[WARNING] Timeout reached, no data received")
         return None
 
-    def send_job(self, dose_g: int, grind_grade: int, recipe_no: int) -> str:
+    def send_job(self, dose_g: int, grind_grade: int, doser_no: int, recipe_no: int) -> str:
         """
         Send a drink job to the robot board.
         Returns 'ACK' on success, raises SerialProtocolError on failure.
         """
-        logger.debug(f"[DEBUG] send_job() called: dose_g={dose_g}, grind_grade={grind_grade}, recipe_no={recipe_no}")
+        logger.debug(f"[DEBUG] send_job() called: dose_g={dose_g}, grind_grade={grind_grade}, doser_no={doser_no}, recipe_no={recipe_no}")
 
-        self._validate_job(dose_g, grind_grade, recipe_no)
+        self._validate_job(dose_g, grind_grade, doser_no, recipe_no)
         logger.debug(f"[DEBUG] Job parameters validated OK")
 
-        cmd = JobCommand(dose_g, grind_grade, recipe_no)
+        cmd = JobCommand(dose_g, grind_grade, doser_no, recipe_no)
         logger.debug(f"[DEBUG] JobCommand created: {cmd}")
 
         with self._lock:
@@ -488,16 +492,16 @@ def get_robot_client() -> RobotControlBoardSerialClient:
         return _robot_client
 
 
-def send_manual_order(dose_g: int, grind_grade: int, recipe_no: int) -> tuple[bool, str]:
+def send_manual_order(dose_g: int, grind_grade: int, doser_no: int, recipe_no: int) -> tuple[bool, str]:
     """
     Send a manual order to the robot.
     Returns (success: bool, message: str)
     """
-    logger.debug(f"[DEBUG] send_manual_order() called: dose={dose_g}g, grade={grind_grade}, recipe={recipe_no}")
+    logger.debug(f"[DEBUG] send_manual_order() called: dose={dose_g}g, grade={grind_grade}, doser={doser_no}, recipe={recipe_no}")
 
     # Demo mode - simulate successful order
     if is_demo_mode():
-        logger.info(f"[DEMO] Simulating order: {dose_g}g, grade {grind_grade}, recipe {recipe_no}")
+        logger.info(f"[DEMO] Simulating order: {dose_g}g, grade {grind_grade}, doser {doser_no}, recipe {recipe_no}")
         time.sleep(0.5)  # Simulate processing time
         return True, "ACK (Demo Mode)"
 
@@ -523,7 +527,7 @@ def send_manual_order(dose_g: int, grind_grade: int, recipe_no: int) -> tuple[bo
 
     try:
         logger.debug(f"[DEBUG] Sending job to robot...")
-        result = client.send_job(dose_g, grind_grade, recipe_no)
+        result = client.send_job(dose_g, grind_grade, doser_no, recipe_no)
         logger.info(f"[SUCCESS] Order sent successfully: {result}")
         return True, result
     except SerialProtocolError as e:
