@@ -6,6 +6,8 @@ import threading
 import time
 from dataclasses import dataclass
 from typing import Optional
+import socket
+from contextlib import closing
 import logging
 import traceback
 
@@ -528,8 +530,17 @@ def send_manual_order(dose_g: int, grind_grade: int, doser_no: int, recipe_no: i
     try:
         logger.debug(f"[DEBUG] Sending job to robot...")
         result = client.send_job(dose_g, grind_grade, doser_no, recipe_no)
-        logger.info(f"[SUCCESS] Order sent successfully: {result}")
-        return True, result
+        logger.info(f"[SUCCESS] Order sent successfully (serial): {result}")
+
+        # Now send commands to the cobot over Ethernet socket
+        logger.info("[INFO] Sending the robot commands over ethernet socket")
+        ok, msg = send_tcp_command_to_cobot(doser_no, recipe_no)
+        if ok:
+            logger.info(f"[SUCCESS] Order finished: {msg}")
+            return True, msg
+        else:
+            logger.error(f"[ERROR] Ethernet command failed: {msg}")
+            return False, f"Ethernet command failed: {msg}"
     except SerialProtocolError as e:
         logger.error(f"[ERROR] Protocol error: {e}")
         # Check if it's a broken pipe and try reconnect
@@ -574,6 +585,178 @@ def wait_for_order_completion(timeout: float = 60.0) -> tuple[bool, str]:
     except Exception as e:
         logger.exception("[ERROR] Unexpected error waiting for completion")
         return False, f"Unexpected error: {e}"
+
+
+def send_tcp_command_to_cobot(doser_no: int, recipe_no: int, host: str = "192.168.58.10", port: int = 1233, connect_timeout: float = 10.0, response_timeout: float = 30.0) -> tuple[bool, str]:
+    """
+    Act as a TCP server for the cobot client.
+
+    Workflow expected by the cobot (client) pseudocode provided by the user:
+    - The cobot will open a connection to (host, port), then send "OK" as a handshake.
+    - The server (this function) should respond with "start" and then send the command parameters.
+    - The cobot performs tasks and then sends back "Done" (or similar).
+
+    We bind to the requested host and port (user asked to use 192.168.58.10:1233).
+
+    Returns (True, message) on success where message is the response from the cobot (e.g. "Done").
+    Returns (False, error_message) on failure.
+    """
+
+    logger.debug(f"[DEBUG] send_tcp_command_to_cobot() called: doser={doser_no}, recipe={recipe_no}, host={host}, port={port}")
+
+    # Simple validation
+    try:
+        doser_no = int(doser_no)
+        recipe_no = int(recipe_no)
+    except Exception:
+        return False, "Invalid doser_no or recipe_no (must be integers)"
+
+    # Create listening socket and wait for client to connect
+    srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        srv.bind((host, port))
+        srv.listen(1)
+        srv.settimeout(connect_timeout)
+        logger.info(f"[INFO] TCP server listening on {host}:{port}, waiting for cobot client connection...")
+
+        try:
+            conn, addr = srv.accept()
+        except socket.timeout:
+            return False, f"Timeout waiting for cobot client to connect on {host}:{port}"
+
+        with closing(conn):
+            logger.info(f"[INFO] Cobot client connected from {addr}")
+            conn.settimeout(1.0)
+
+            # Initial handshake from client (expecting "OK" or similar)
+            try:
+                data = conn.recv(1024)
+                if not data:
+                    return False, "No handshake data received from client"
+                recv = data.decode('utf-8', errors='replace').strip()
+                logger.debug(f"[DEBUG] Handshake received: {recv}")
+            except socket.timeout:
+                return False, "Timeout while waiting for client handshake"
+            except Exception as e:
+                logger.error(f"[ERROR] Error reading handshake: {e}")
+                return False, f"Handshake read error: {e}"
+
+            # Send "start" and expect an ACK from the client
+            try:
+                conn.sendall(b"start")
+                logger.info("[INFO] Sent: start")
+            except Exception as e:
+                logger.error(f"[ERROR] Failed to send 'start': {e}")
+                return False, f"Send error: {e}"
+
+            # Wait for ACK from client
+            deadline = time.time() + response_timeout
+            ack_received = False
+            buffer = b""
+            while time.time() < deadline:
+                try:
+                    chunk = conn.recv(1024)
+                    if not chunk:
+                        time.sleep(0.05)
+                        continue
+                    buffer += chunk
+                    text = buffer.decode('utf-8', errors='replace').strip()
+                    logger.debug(f"[DEBUG] Waiting for ACK, received chunk: {text}")
+                    if text.lower() in ("ack", "ok"):
+                        ack_received = True
+                        logger.info(f"[INFO] ACK received from client: {text}")
+                        break
+                    # otherwise keep collecting until timeout
+                except socket.timeout:
+                    continue
+                except Exception as e:
+                    logger.error(f"[ERROR] Error while waiting for ACK: {e}")
+                    return False, f"Receive error: {e}"
+
+            if not ack_received:
+                logger.warning("[WARNING] ACK not received after start")
+                return False, "ACK not received from client after start"
+
+            # Send DOSER command and wait for Done
+            try:
+                doser_msg = f"D{doser_no}"
+                conn.sendall(doser_msg.encode('utf-8'))
+                logger.info(f"[INFO] Sent: {doser_msg}")
+            except Exception as e:
+                logger.error(f"[ERROR] Failed to send doser: {e}")
+                return False, f"Send error: {e}"
+
+            # Wait for Done after doser action
+            deadline = time.time() + response_timeout
+            buffer = b""
+            doser_done = False
+            while time.time() < deadline:
+                try:
+                    chunk = conn.recv(1024)
+                    if not chunk:
+                        time.sleep(0.05)
+                        continue
+                    buffer += chunk
+                    text = buffer.decode('utf-8', errors='replace').strip()
+                    logger.debug(f"[DEBUG] Waiting for DOSER Done, received: {text}")
+                    if text.lower().startswith("done") or text.lower() in ("done", "ok"):
+                        doser_done = True
+                        logger.info(f"[INFO] DOSER completed: {text}")
+                        break
+                except socket.timeout:
+                    continue
+                except Exception as e:
+                    logger.error(f"[ERROR] Error waiting for doser completion: {e}")
+                    return False, f"Receive error: {e}"
+
+            if not doser_done:
+                logger.warning("[WARNING] Timeout waiting for doser completion")
+                return False, "Timeout waiting for doser completion"
+
+            # Send RECIPE command and wait for Done
+            try:
+                recipe_msg = f"R{recipe_no}"
+                conn.sendall(recipe_msg.encode('utf-8'))
+                logger.info(f"[INFO] Sent: {recipe_msg}")
+            except Exception as e:
+                logger.error(f"[ERROR] Failed to send recipe: {e}")
+                return False, f"Send error: {e}"
+
+            deadline = time.time() + response_timeout
+            buffer = b""
+            recipe_done = False
+            while time.time() < deadline:
+                try:
+                    chunk = conn.recv(1024)
+                    if not chunk:
+                        time.sleep(0.05)
+                        continue
+                    buffer += chunk
+                    text = buffer.decode('utf-8', errors='replace').strip()
+                    logger.debug(f"[DEBUG] Waiting for RECIPE Done, received: {text}")
+                    if text.lower().startswith("done") or text.lower() in ("done", "ok"):
+                        recipe_done = True
+                        logger.info(f"[INFO] RECIPE completed: {text}")
+                        return True, text
+                except socket.timeout:
+                    continue
+                except Exception as e:
+                    logger.error(f"[ERROR] Error waiting for recipe completion: {e}")
+                    return False, f"Receive error: {e}"
+
+            logger.warning("[WARNING] Timeout waiting for recipe completion")
+            return False, "Timeout waiting for recipe completion"
+
+    except Exception as e:
+        logger.error(f"[ERROR] TCP server error: {e}")
+        logger.debug(f"[DEBUG] TCP server traceback:\n{traceback.format_exc()}")
+        return False, str(e)
+    finally:
+        try:
+            srv.close()
+        except Exception:
+            pass
 
 
 def check_robot_connection() -> tuple[bool, str]:
