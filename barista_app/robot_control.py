@@ -615,7 +615,11 @@ def send_tcp_command_to_cobot(doser_no: int, recipe_no: int, host: str = "192.16
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
         srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        srv.bind((host, port))
+        try:
+            srv.bind((host, port))
+        except OSError as e:
+            logger.error(f"[ERROR] Failed to bind to {host}:{port}: {e}")
+            return False, f"Bind failed: {e}"
         srv.listen(1)
         srv.settimeout(connect_timeout)
         logger.info(f"[INFO] TCP server listening on {host}:{port}, waiting for cobot client connection...")
