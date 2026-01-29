@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-Simple serial connection test script for COM7
+Simple serial connection test script for COM6
 """
 import serial
 import time
 
 def test_serial_connection():
-    """Connect to COM7 and send a test message."""
-    port = 'COM7'
+    """Connect to COM6 and send a test message."""
+    port = 'COM6'
     baudrate = 115200
     timeout = 2.0
     

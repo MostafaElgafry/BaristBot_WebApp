@@ -51,7 +51,7 @@ class RobotControlBoardSerialClient:
 
     def __init__(
         self,
-        port: str = "COM7",
+        port: str = "COM6",
         baudrate: int = 115_200,
         read_timeout_s: float = 1.5,
         write_timeout_s: float = 1.5,
@@ -488,7 +488,7 @@ def get_robot_client() -> RobotControlBoardSerialClient:
     with _robot_lock:
         if _robot_client is None:
             from django.conf import settings
-            port = getattr(settings, 'ROBOT_SERIAL_PORT', 'COM7')
+            port = getattr(settings, 'ROBOT_SERIAL_PORT', 'COM6')
             baudrate = getattr(settings, 'ROBOT_BAUDRATE', 115200)
             _robot_client = RobotControlBoardSerialClient(port=port, baudrate=baudrate)
         return _robot_client

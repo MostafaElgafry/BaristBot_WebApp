@@ -254,7 +254,7 @@ def settings_system(request):
     system_settings = SystemSettings.get_settings()
 
     # Get robot connection settings
-    serial_port = getattr(django_settings, 'ROBOT_SERIAL_PORT', 'COM7')
+    serial_port = getattr(django_settings, 'ROBOT_SERIAL_PORT', 'COM6')
     baud_rate = getattr(django_settings, 'ROBOT_BAUDRATE', 115200)
     demo_mode = getattr(django_settings, 'ROBOT_DEMO_MODE', False)
 

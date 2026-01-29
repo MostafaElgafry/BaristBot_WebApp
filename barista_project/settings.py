@@ -121,8 +121,8 @@ LOGOUT_REDIRECT_URL = '/login/'
 AUTH_USER_MODEL = 'barista_app.UserProfile'
 
 # Robot Control Settings
-# On Windows use 'COM7', 'COM3', etc. On Linux use '/dev/ttyUSB0', '/dev/ttyACM0', etc.
-ROBOT_SERIAL_PORT = os.environ.get('ROBOT_SERIAL_PORT', 'COM7')
+# On Windows use 'COM6', 'COM3', etc. On Linux use '/dev/ttyUSB0', '/dev/ttyACM0', etc.
+ROBOT_SERIAL_PORT = os.environ.get('ROBOT_SERIAL_PORT', 'COM6')
 ROBOT_BAUDRATE = int(os.environ.get('ROBOT_BAUDRATE', 115200))
 # ROBOT_DEMO_MODE: Default is OFF (real robot mode)
 # Set environment variable ROBOT_DEMO_MODE=true to enable demo/simulation mode
