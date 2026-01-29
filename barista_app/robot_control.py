@@ -53,9 +53,9 @@ class RobotControlBoardSerialClient:
         self,
         port: str = "COM6",
         baudrate: int = 115_200,
-        read_timeout_s: float = 1.5,
-        write_timeout_s: float = 1.5,
-        ack_timeout_s: float = 2.0,
+        read_timeout_s: float = 3,
+        write_timeout_s: float = 3,
+        ack_timeout_s: float = 20,
         newline: bytes = b"\n",
     ):
         self._port = port
