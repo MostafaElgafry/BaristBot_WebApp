@@ -245,10 +245,14 @@ class RobotControlBoardSerialClient:
         logger.warning(f"[WARNING] Timeout reached, no data received")
         return None
 
-    def send_job(self, dose_g: int, grind_grade: int, doser_no: int, recipe_no: int) -> str:
+    def send_job(self, dose_g: int, grind_grade: int, doser_no: int, recipe_no: int, wait_for_ack: bool = False) -> str:
         """
         Send a drink job to the robot board.
-        Returns 'ACK' on success, raises SerialProtocolError on failure.
+
+        By default this method is non-blocking with respect to serial
+        acknowledgements: it sends the JOB line and returns immediately with
+        'SENT'. If `wait_for_ack` is True the previous blocking behaviour is
+        retained (waits for 'ACK', 'OK' or 'ERR...' and returns that value).
         """
         logger.debug(f"[DEBUG] send_job() called: dose_g={dose_g}, grind_grade={grind_grade}, doser_no={doser_no}, recipe_no={recipe_no}")
 
@@ -297,6 +301,12 @@ class RobotControlBoardSerialClient:
                     logger.error(f"[ERROR] BROKEN PIPE on write - marking connection as dead")
                     self._connected = False
                 raise SerialProtocolError(f"Write failed: {e}")
+            # If the caller doesn't want to wait for an acknowledgement,
+            # return immediately after the write/flush. This makes the send
+            # non-blocking with respect to serial ACKs.
+            if not wait_for_ack:
+                logger.info("[INFO] Job sent (non-blocking mode) - not waiting for ACK")
+                return "SENT"
 
             logger.debug(f"[DEBUG] Waiting for response, timeout={self._ack_timeout}s")
 
@@ -587,7 +597,7 @@ def wait_for_order_completion(timeout: float = 60.0) -> tuple[bool, str]:
         return False, f"Unexpected error: {e}"
 
 
-def send_tcp_command_to_cobot(doser_no: int, recipe_no: int, host: str = "192.168.58.10", port: int = 1233, connect_timeout: float = 10.0, response_timeout: float = 30.0) -> tuple[bool, str]:
+def send_tcp_command_to_cobot(doser_no: int, recipe_no: int, host: str = "192.168.57.10", port: int = 1233, connect_timeout: float = 10.0, response_timeout: float = 30.0) -> tuple[bool, str]:
     """
     Act as a TCP server for the cobot client.
 
@@ -798,13 +808,14 @@ def check_robot_connection() -> tuple[bool, str]:
             logger.info(f"[INFO] Connected successfully")
         except SerialNotConnectedError as e:
             logger.error(f"[ERROR] Failed to connect: {e}")
-            return False, f"Not connected: {e}"
+            return False, f"Failed to connect: {e}"
 
     # If we got here, serial port is open and healthy
-    # Don't try to send STATUS command - robot may not support it
-    # Just report as connected since the port is open
     if client.is_connected():
         logger.info(f"[INFO] Robot connected on {client._port}")
         return True, f"Connected on {client._port}"
 
     return False, "Unknown connection state"
+
+
+# TCP server functionality removed — using per-call server in `send_tcp_command_to_cobot` (original behavior)
