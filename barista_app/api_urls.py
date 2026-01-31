@@ -25,4 +25,9 @@ urlpatterns = [
     path('analytics/', api_views.AnalyticsAPIView.as_view(), name='api-analytics'),
     path('robot/status/', api_views.RobotStatusAPIView.as_view(), name='api-robot-status'),
     path('orders/<int:order_id>/wait-completion/', api_views.OrderCompletionAPIView.as_view(), name='api-order-completion'),
+
+    # Machine User API
+    path('machine/order/', api_views.MachineOrderAPIView.as_view(), name='api-machine-order'),
+    path('machine/order/<int:order_id>/complete/', api_views.MachineOrderCompleteAPIView.as_view(), name='api-machine-order-complete'),
+    path('machine/queue/', api_views.MachineQueueStatusAPIView.as_view(), name='api-machine-queue'),
 ]

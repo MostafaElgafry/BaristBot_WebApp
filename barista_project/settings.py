@@ -127,3 +127,7 @@ ROBOT_BAUDRATE = int(os.environ.get('ROBOT_BAUDRATE', 115200))
 # ROBOT_DEMO_MODE: Default is OFF (real robot mode)
 # Set environment variable ROBOT_DEMO_MODE=true to enable demo/simulation mode
 ROBOT_DEMO_MODE = os.environ.get('ROBOT_DEMO_MODE', 'false').lower() == 'true'
+
+# Machine API Key for machine-to-machine authentication
+# Set via environment variable in production
+MACHINE_API_KEY = os.environ.get('MACHINE_API_KEY', 'barista-machine-key-change-me')

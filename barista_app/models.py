@@ -111,6 +111,21 @@ class Recipe(models.Model):
     """Recipe definitions for tone machine buttons."""
     name = models.CharField(max_length=100)
     description = models.TextField(blank=True)
+    dose_grams = models.IntegerField(
+        validators=[MinValueValidator(1), MaxValueValidator(200)],
+        default=18,
+        help_text="Default dose in grams for this recipe"
+    )
+    grind_grade = models.IntegerField(
+        validators=[MinValueValidator(1), MaxValueValidator(11)],
+        default=5,
+        help_text="Default grind grade (1-11)"
+    )
+    doser_number = models.IntegerField(
+        validators=[MinValueValidator(1), MaxValueValidator(4)],
+        default=1,
+        help_text="Doser number to use (1-4)"
+    )
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -120,6 +135,11 @@ class Recipe(models.Model):
 
     def __str__(self):
         return self.name
+
+    def get_recipe_number(self):
+        """Resolve the recipe_number from the ToneMachineButton mapping."""
+        button = self.tone_buttons.filter(is_active=True).first()
+        return button.button_number if button else None
 
 
 class ToneMachineButton(models.Model):
@@ -203,6 +223,7 @@ class ManualOrder(models.Model):
     """Manual orders sent to the robot."""
     STATUS_CHOICES = [
         ('pending', 'Pending'),
+        ('queued', 'Queued'),
         ('sent', 'Sent'),
         ('ack', 'Acknowledged'),
         ('processing', 'Processing'),
@@ -210,6 +231,19 @@ class ManualOrder(models.Model):
         ('error', 'Error'),
     ]
 
+    SOURCE_CHOICES = [
+        ('manual', 'Manual'),
+        ('machine', 'Machine API'),
+    ]
+
+    external_order_id = models.CharField(
+        max_length=100, blank=True, default='',
+        help_text="External order ID from the calling system"
+    )
+    order_name = models.CharField(
+        max_length=100, blank=True, default='',
+        help_text="Recipe/order name from the calling system"
+    )
     dose_grams = models.IntegerField(
         validators=[MinValueValidator(1), MaxValueValidator(200)]
     )
@@ -225,11 +259,13 @@ class ManualOrder(models.Model):
         validators=[MinValueValidator(1), MaxValueValidator(4)]
     )
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    source = models.CharField(max_length=20, choices=SOURCE_CHOICES, default='manual')
     response_message = models.TextField(blank=True)
     created_by = models.ForeignKey(
         UserProfile,
         on_delete=models.SET_NULL,
         null=True,
+        blank=True,
         related_name='manual_orders'
     )
     created_at = models.DateTimeField(auto_now_add=True)

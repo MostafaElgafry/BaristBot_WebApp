@@ -102,7 +102,10 @@ class RecipeSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Recipe
-        fields = ['id', 'name', 'description', 'is_active', 'created_at']
+        fields = [
+            'id', 'name', 'description', 'dose_grams', 'grind_grade',
+            'doser_number', 'is_active', 'created_at'
+        ]
         read_only_fields = ['id', 'created_at']
 
 
@@ -226,6 +229,45 @@ class AnalyticsDailySerializer(serializers.ModelSerializer):
             'top_recipe', 'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
+
+
+class MachineOrderInputSerializer(serializers.Serializer):
+    """Serializer for incoming machine API orders. Only requires order_name + order_id."""
+    order_name = serializers.CharField(
+        max_length=100,
+        help_text="Recipe name (must match an active Recipe)"
+    )
+    order_id = serializers.CharField(
+        max_length=100,
+        help_text="External order ID from the calling system"
+    )
+
+    def validate_order_name(self, value):
+        from .models import Recipe
+        try:
+            recipe = Recipe.objects.get(name__iexact=value, is_active=True)
+        except Recipe.DoesNotExist:
+            active_recipes = list(
+                Recipe.objects.filter(is_active=True).values_list('name', flat=True)
+            )
+            raise serializers.ValidationError(
+                f"No active recipe found with name '{value}'. "
+                f"Available recipes: {active_recipes}"
+            )
+        return value
+
+
+class MachineOrderResponseSerializer(serializers.ModelSerializer):
+    """Serializer for machine API order responses."""
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+
+    class Meta:
+        model = ManualOrder
+        fields = [
+            'id', 'external_order_id', 'order_name',
+            'dose_grams', 'grind_grade', 'doser_number', 'recipe_number',
+            'status', 'status_display', 'source', 'response_message', 'created_at'
+        ]
 
 
 class DashboardSerializer(serializers.Serializer):

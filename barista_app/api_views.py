@@ -20,11 +20,13 @@ from .serializers import (
     UserProfileSerializer, UserCreateSerializer, LoginSerializer,
     CoffeeTypeSerializer, GrinderSerializer, DozerSerializer,
     RecipeSerializer, ToneMachineButtonSerializer, InventorySerializer,
-    ManualOrderSerializer, SystemConfigurationSerializer,
+    ManualOrderSerializer, MachineOrderInputSerializer,
+    MachineOrderResponseSerializer, SystemConfigurationSerializer,
     SystemSettingsSerializer, ActivityLogSerializer, AnalyticsDailySerializer,
     DashboardSerializer
 )
 from .robot_control import send_manual_order, check_robot_connection, wait_for_order_completion
+from .order_queue import enqueue_order, complete_order, get_queue_info
 
 
 class IsManagerPermission(permissions.BasePermission):
@@ -571,4 +573,117 @@ class OrderCompletionAPIView(APIView):
             'status': order.status,
             'message': message,
             'completed': success
+        })
+
+
+# ─── Machine User API ───────────────────────────────────────────────
+
+
+class MachineAPIKeyPermission(permissions.BasePermission):
+    """Validates the X-API-Key header against MACHINE_API_KEY setting."""
+
+    def has_permission(self, request, view):
+        from django.conf import settings
+        api_key = request.headers.get('X-API-Key', '')
+        if not api_key:
+            self.message = 'Missing X-API-Key header.'
+            return False
+        if api_key != settings.MACHINE_API_KEY:
+            self.message = 'Invalid API key.'
+            return False
+        return True
+
+
+class MachineOrderAPIView(APIView):
+    """
+    Machine-to-machine API for placing orders.
+
+    Accepts only `order_name` (recipe name) and `order_id` (external ID).
+    The system resolves all robot parameters (dose, grind, doser, recipe number)
+    from the Recipe configuration.
+
+    The machine can only process one order at a time.
+    If the machine is busy, the order is added to a queue.
+    When the current order completes, the next queued order
+    is automatically dispatched.
+    """
+    authentication_classes = []
+    permission_classes = [MachineAPIKeyPermission]
+
+    def post(self, request):
+        """Place a new order. Returns immediately with status (processing or queued)."""
+        serializer = MachineOrderInputSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        order_name = serializer.validated_data['order_name']
+        external_order_id = serializer.validated_data['order_id']
+
+        # Look up recipe and resolve all robot parameters
+        recipe = Recipe.objects.get(name__iexact=order_name, is_active=True)
+        recipe_number = recipe.get_recipe_number()
+        if recipe_number is None:
+            return Response({
+                'error': f"Recipe '{recipe.name}' is not assigned to any active tone machine button."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        order = ManualOrder.objects.create(
+            external_order_id=external_order_id,
+            order_name=recipe.name,
+            dose_grams=recipe.dose_grams,
+            grind_grade=recipe.grind_grade,
+            doser_number=recipe.doser_number,
+            recipe_number=recipe_number,
+            status='pending',
+            source='machine',
+            created_by=None,
+        )
+
+        order_status, message = enqueue_order(order)
+        order.refresh_from_db()
+
+        return Response({
+            'order_id': order.id,
+            'external_order_id': order.external_order_id,
+            'order_name': order.order_name,
+            'status': order.status,
+            'message': message,
+        }, status=status.HTTP_201_CREATED)
+
+
+class MachineOrderCompleteAPIView(APIView):
+    """
+    Callback endpoint for marking an order as completed.
+
+    When called, it completes the given order and automatically
+    dispatches the next queued order to the robot.
+    """
+    authentication_classes = []
+    permission_classes = [MachineAPIKeyPermission]
+
+    def post(self, request, order_id):
+        """Mark order as completed, dispatch next queued order."""
+        result = complete_order(order_id)
+
+        if not result['success']:
+            return Response(result, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(result, status=status.HTTP_200_OK)
+
+
+class MachineQueueStatusAPIView(APIView):
+    """
+    Returns the current queue state: active order and queued orders.
+    """
+    authentication_classes = []
+    permission_classes = [MachineAPIKeyPermission]
+
+    def get(self, request):
+        info = get_queue_info()
+        active = info['active_order']
+        queued = info['queued_orders']
+
+        return Response({
+            'active_order': MachineOrderResponseSerializer(active).data if active else None,
+            'queue_length': info['queue_length'],
+            'queued_orders': MachineOrderResponseSerializer(queued, many=True).data,
         })
