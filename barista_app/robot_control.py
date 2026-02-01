@@ -424,6 +424,43 @@ class RobotControlBoardSerialClient:
             raise SerialProtocolError("Timeout waiting for status response")
 
 
+    def send_check(self) -> str:
+        """
+        Send a CHECK command to query delivery cup and coffee server presence.
+        Returns the raw response string (e.g. "data,1,0,0,1,0").
+        """
+        logger.debug("[DEBUG] send_check() called")
+
+        with self._lock:
+            self._require_serial()
+
+            # Clear stale data
+            if self._serial.in_waiting > 0:
+                stale_data = self._serial.read(self._serial.in_waiting)
+                logger.warning(f"[WARNING] Cleared {len(stale_data)} stale bytes: {stale_data!r}")
+
+            check_cmd = b"CHECK" + self._newline
+            logger.debug(f"[DEBUG] Sending check command: {check_cmd!r}")
+
+            try:
+                bytes_written = self._serial.write(check_cmd)
+                logger.debug(f"[DEBUG] Check command sent ({bytes_written} bytes)")
+                self._serial.flush()
+            except Exception as e:
+                logger.error(f"[ERROR] Failed to send CHECK command: {e}")
+                if "Broken pipe" in str(e):
+                    self._connected = False
+                raise SerialProtocolError(f"CHECK write failed: {e}")
+
+            response = self._read_response(timeout=self._ack_timeout)
+
+            if response is None:
+                raise SerialProtocolError("Timeout waiting for CHECK response")
+
+            response_str = response.decode("ascii", errors="replace").strip()
+            logger.info(f"[INFO] CHECK response: {response_str}")
+            return response_str
+
     def check_connection_health(self) -> tuple[bool, str]:
         """
         Check if the serial connection is healthy.
@@ -816,6 +853,107 @@ def check_robot_connection() -> tuple[bool, str]:
         return True, f"Connected on {client._port}"
 
     return False, "Unknown connection state"
+
+
+def check_pre_use() -> dict:
+    """
+    Send a CHECK command to verify the delivery cup and coffee servers
+    are present before allowing an order.
+
+    Returns a dict:
+        ok (bool): True if cup is present AND at least one server is present.
+        cup_present (bool): Whether the delivery cup is detected.
+        servers (list[bool]): Presence of the four coffee servers.
+        message (str): Human-readable summary.
+    """
+    logger.debug("[DEBUG] check_pre_use() called")
+
+    # Demo mode — simulate everything present
+    if is_demo_mode():
+        logger.info("[DEMO] Simulating pre-use check: all present")
+        return {
+            "ok": True,
+            "cup_present": True,
+            "servers": [True, True, True, True],
+            "message": "All present (Demo Mode)",
+        }
+
+    client = get_robot_client()
+
+    # Ensure connection (same pattern as send_manual_order)
+    is_healthy, health_status = client.check_connection_health()
+    if not is_healthy:
+        logger.warning(f"[WARNING] Connection unhealthy for CHECK, attempting reconnect...")
+        if not client.reconnect():
+            return {
+                "ok": False,
+                "cup_present": False,
+                "servers": [False, False, False, False],
+                "message": f"Robot connection lost: {health_status}",
+            }
+
+    if not client.is_connected():
+        try:
+            client.connect()
+        except SerialNotConnectedError as e:
+            return {
+                "ok": False,
+                "cup_present": False,
+                "servers": [False, False, False, False],
+                "message": f"Robot not connected: {e}",
+            }
+
+    # Send the CHECK command
+    try:
+        raw = client.send_check()
+    except (SerialProtocolError, SerialNotConnectedError) as e:
+        logger.error(f"[ERROR] CHECK command failed: {e}")
+        return {
+            "ok": False,
+            "cup_present": False,
+            "servers": [False, False, False, False],
+            "message": f"CHECK command failed: {e}",
+        }
+
+    # Parse response: expected format "data,<cup>,<s1>,<s2>,<s3>,<s4>"
+    try:
+        parts = raw.split(",")
+        if len(parts) < 6 or parts[0].strip().lower() != "data":
+            raise ValueError(f"Unexpected CHECK response format: {raw}")
+
+        values = [int(v.strip()) for v in parts[1:6]]
+        cup_present = values[0] == 1
+        servers = [v == 1 for v in values[1:5]]
+    except (ValueError, IndexError) as e:
+        logger.error(f"[ERROR] Failed to parse CHECK response '{raw}': {e}")
+        return {
+            "ok": False,
+            "cup_present": False,
+            "servers": [False, False, False, False],
+            "message": f"Invalid CHECK response: {raw}",
+        }
+
+    any_server = any(servers)
+    ok = cup_present and any_server
+
+    # Build human-readable message
+    if ok:
+        message = "Pre-use check passed"
+    else:
+        problems = []
+        if not cup_present:
+            problems.append("Delivery cup is missing")
+        if not any_server:
+            problems.append("No coffee server detected")
+        message = ". ".join(problems)
+
+    logger.info(f"[INFO] Pre-use check: ok={ok}, cup={cup_present}, servers={servers}")
+    return {
+        "ok": ok,
+        "cup_present": cup_present,
+        "servers": servers,
+        "message": message,
+    }
 
 
 # TCP server functionality removed — using per-call server in `send_tcp_command_to_cobot` (original behavior)

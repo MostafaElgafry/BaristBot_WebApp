@@ -359,6 +359,42 @@
         // Disable send button
         const sendBtn = document.getElementById('send-btn');
         sendBtn.disabled = true;
+        sendBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Checking...';
+
+        // --- Pre-use check ---
+        try {
+            const checkResp = await fetch('/api/robot/pre-use-check/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrftoken
+                }
+            });
+            const checkData = await checkResp.json();
+
+            if (!checkData.ok) {
+                const resultCard = document.getElementById('result-card');
+                const resultBody = document.getElementById('result-body');
+                resultBody.innerHTML = `
+                    <div class="alert alert-danger mb-0">
+                        <i class="bi bi-x-circle-fill me-2"></i>
+                        <strong>Pre-use check failed!</strong>
+                        <div class="mt-2">${checkData.message}</div>
+                    </div>
+                `;
+                resultCard.style.display = 'block';
+                sendBtn.disabled = false;
+                sendBtn.innerHTML = '<i class="bi bi-send-fill me-2"></i>Send Order';
+                return;
+            }
+        } catch (e) {
+            showToast('Pre-use check failed — cannot reach robot', 'error');
+            sendBtn.disabled = false;
+            sendBtn.innerHTML = '<i class="bi bi-send-fill me-2"></i>Send Order';
+            return;
+        }
+
+        // --- Send order ---
         sendBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Sending...';
 
         try {

@@ -25,7 +25,7 @@ from .serializers import (
     SystemSettingsSerializer, ActivityLogSerializer, AnalyticsDailySerializer,
     DashboardSerializer
 )
-from .robot_control import send_manual_order, check_robot_connection, wait_for_order_completion
+from .robot_control import send_manual_order, check_robot_connection, wait_for_order_completion, check_pre_use
 from .order_queue import enqueue_order, complete_order, get_queue_info
 
 
@@ -524,6 +524,16 @@ class RobotStatusAPIView(APIView):
             'connected': connected,
             'status': status_msg
         })
+
+
+class PreUseCheckAPIView(APIView):
+    """Check delivery cup and coffee server presence before sending an order."""
+    permission_classes = [CanSendOrdersPermission]
+
+    def post(self, request):
+        result = check_pre_use()
+        http_status = status.HTTP_200_OK if result["ok"] else status.HTTP_409_CONFLICT
+        return Response(result, status=http_status)
 
 
 class OrderCompletionAPIView(APIView):
