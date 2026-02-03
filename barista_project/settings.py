@@ -130,4 +130,4 @@ ROBOT_DEMO_MODE = os.environ.get('ROBOT_DEMO_MODE', 'false').lower() == 'true'
 
 # Machine API Key for machine-to-machine authentication
 # Set via environment variable in production
-MACHINE_API_KEY = os.environ.get('MACHINE_API_KEY', 'barista-machine-key-change-me')
+MACHINE_API_KEY = os.environ.get('MACHINE_API_KEY', 'egyrobot8000')

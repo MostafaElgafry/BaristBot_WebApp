@@ -17,7 +17,7 @@ X-API-Key: <your-api-key>
 ```
 
 The key is configured on the server via the `MACHINE_API_KEY` environment variable.
-Default (development only): `barista-machine-key-change-me`
+Default: `egyrobot8000`
 
 **Responses without a valid key:**
 
@@ -208,13 +208,13 @@ This can be done via:
 
 ```bash
 # Update recipe with robot parameters (requires auth token)
-curl -X PATCH http://localhost:8000/api/recipes/1/ \
+curl -X PATCH http://192.168.1.240:8000/api/recipes/1/ \
   -H "Authorization: Token <user-token>" \
   -H "Content-Type: application/json" \
   -d '{"dose_grams": 18, "grind_grade": 5, "doser_number": 1}'
 
 # Assign to tone machine button 2 (requires auth token)
-curl -X PATCH http://localhost:8000/api/tone-buttons/2/ \
+curl -X PATCH http://192.168.1.240:8000/api/tone-buttons/2/ \
   -H "Authorization: Token <user-token>" \
   -H "Content-Type: application/json" \
   -d '{"recipe": 1}'
@@ -239,8 +239,8 @@ Now `POST /api/machine/order/` with `"order_name": "Espresso"` will use dose=18g
 ## Full Example Flow
 
 ```bash
-API_KEY="barista-machine-key-change-me"
-URL="http://localhost:8000/api/machine"
+API_KEY="egyrobot8000"
+URL="http://192.168.1.240:8000/api/machine"
 
 # 1. Place first order -- goes directly to robot
 curl -X POST "$URL/order/" \
@@ -285,4 +285,4 @@ curl -X POST "$URL/order/1/complete/" \
 
 | Variable          | Default                          | Description                    |
 |-------------------|----------------------------------|--------------------------------|
-| `MACHINE_API_KEY` | `barista-machine-key-change-me`  | API key for machine endpoints  |
+| `MACHINE_API_KEY` | `egyrobot8000`                   | API key for machine endpoints  |

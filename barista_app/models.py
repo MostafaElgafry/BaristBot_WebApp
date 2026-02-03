@@ -332,7 +332,7 @@ class SystemSettings(models.Model):
     )
     robot_version = models.CharField(max_length=20, default='v2.3.1')
     firmware_version = models.CharField(max_length=20, default='v1.8.5')
-    ip_address = models.CharField(max_length=45, default='192.168.1.100')
+    ip_address = models.CharField(max_length=45, default='192.168.1.240')
     last_sync = models.DateTimeField(null=True, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
 
