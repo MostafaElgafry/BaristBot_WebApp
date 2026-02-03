@@ -31,4 +31,5 @@ urlpatterns = [
     path('machine/order/', api_views.MachineOrderAPIView.as_view(), name='api-machine-order'),
     path('machine/order/<int:order_id>/complete/', api_views.MachineOrderCompleteAPIView.as_view(), name='api-machine-order-complete'),
     path('machine/queue/', api_views.MachineQueueStatusAPIView.as_view(), name='api-machine-queue'),
+    path('machine/data/', api_views.MachineDataSnapshotAPIView.as_view(), name='api-machine-data'),
 ]

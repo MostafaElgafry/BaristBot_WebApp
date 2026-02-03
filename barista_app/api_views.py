@@ -697,3 +697,22 @@ class MachineQueueStatusAPIView(APIView):
             'queue_length': info['queue_length'],
             'queued_orders': MachineOrderResponseSerializer(queued, many=True).data,
         })
+
+
+class MachineDataSnapshotAPIView(APIView):
+    """
+    Returns a full data snapshot for machine clients.
+
+    Useful for clients that need to sync available configuration/state
+    before sending orders.
+    """
+    authentication_classes = []
+    permission_classes = [MachineAPIKeyPermission]
+
+    def get(self, request):
+        recipe_names = list(
+            Recipe.objects.filter(is_active=True)
+            .order_by('name')
+            .values_list('name', flat=True)
+        )
+        return Response({'recipes': recipe_names})

@@ -353,6 +353,11 @@
         const doser = currentDoser;
         const recipe = currentRecipe;
 
+        if (!Number.isInteger(dose) || dose < 1 || dose > 200) {
+            showToast('Dose must be a number between 1 and 200', 'error');
+            return;
+        }
+
         // Close modal
         bootstrap.Modal.getInstance(document.getElementById('confirmModal')).hide();
 
@@ -412,7 +417,29 @@
                 })
             });
 
-            const result = await response.json();
+            let result = {};
+            try {
+                result = await response.json();
+            } catch (jsonErr) {
+                result = {};
+            }
+
+            if (!response.ok) {
+                const messages = [];
+                for (const [field, errs] of Object.entries(result || {})) {
+                    if (Array.isArray(errs)) {
+                        messages.push(`${field}: ${errs.join(', ')}`);
+                    } else if (typeof errs === 'string') {
+                        messages.push(`${field}: ${errs}`);
+                    }
+                }
+
+                const errorText = messages.length
+                    ? messages.join(' | ')
+                    : `Request failed (${response.status})`;
+                showToast(errorText, 'error');
+                return;
+            }
 
             // Show result
             const resultCard = document.getElementById('result-card');
