@@ -608,9 +608,9 @@ class MachineOrderAPIView(APIView):
     """
     Machine-to-machine API for placing orders.
 
-    Accepts only `order_name` (recipe name) and `order_id` (external ID).
-    The system resolves all robot parameters (dose, grind, doser, recipe number)
-    from the Recipe configuration.
+    Accepts `order_name` + `order_id` and can optionally accept explicit
+    robot parameters (`dose_grams`, `grind_grade`, `doser_number`, `recipe_number`).
+    If explicit parameters are omitted, robot parameters are resolved from recipe config.
 
     The machine can only process one order at a time.
     If the machine is busy, the order is added to a queue.
@@ -625,23 +625,36 @@ class MachineOrderAPIView(APIView):
         serializer = MachineOrderInputSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        order_name = serializer.validated_data['order_name']
-        external_order_id = serializer.validated_data['order_id']
+        data = serializer.validated_data
+        order_name = data['order_name']
+        external_order_id = data['order_id']
 
-        # Look up recipe and resolve all robot parameters
+        # Always resolve recipe by name for canonical order_name.
         recipe = Recipe.objects.get(name__iexact=order_name, is_active=True)
-        recipe_number = recipe.get_recipe_number()
-        if recipe_number is None:
-            return Response({
-                'error': f"Recipe '{recipe.name}' is not assigned to any active tone machine button."
-            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Mode A: caller provides explicit robot params (manual-order style).
+        if all(field in data for field in ('dose_grams', 'grind_grade', 'doser_number', 'recipe_number')):
+            dose_grams = data['dose_grams']
+            grind_grade = data['grind_grade']
+            doser_number = data['doser_number']
+            recipe_number = data['recipe_number']
+        # Mode B: legacy mode (order_name + order_id only), resolve from recipe/button mapping.
+        else:
+            recipe_number = recipe.get_recipe_number()
+            if recipe_number is None:
+                return Response({
+                    'error': f"Recipe '{recipe.name}' is not assigned to any active tone machine button."
+                }, status=status.HTTP_400_BAD_REQUEST)
+            dose_grams = recipe.dose_grams
+            grind_grade = recipe.grind_grade
+            doser_number = recipe.doser_number
 
         order = ManualOrder.objects.create(
             external_order_id=external_order_id,
             order_name=recipe.name,
-            dose_grams=recipe.dose_grams,
-            grind_grade=recipe.grind_grade,
-            doser_number=recipe.doser_number,
+            dose_grams=dose_grams,
+            grind_grade=grind_grade,
+            doser_number=doser_number,
             recipe_number=recipe_number,
             status='pending',
             source='machine',
@@ -710,9 +723,17 @@ class MachineDataSnapshotAPIView(APIView):
     permission_classes = [MachineAPIKeyPermission]
 
     def get(self, request):
-        recipes = list(
-            Recipe.objects.filter(is_active=True)
-            .order_by('name')
-            .values('id', 'name')
-        )
+        recipes = []
+        for recipe in Recipe.objects.filter(is_active=True).order_by('name'):
+            recipe_number = recipe.get_recipe_number()
+            if recipe_number is None:
+                continue
+            recipes.append({
+                'id': recipe.id,
+                'name': recipe.name,
+                'dose_grams': recipe.dose_grams,
+                'grind_grade': recipe.grind_grade,
+                'doser_number': recipe.doser_number,
+                'recipe_number': recipe_number,
+            })
         return Response({'recipes': recipes})

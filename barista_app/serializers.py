@@ -232,7 +232,7 @@ class AnalyticsDailySerializer(serializers.ModelSerializer):
 
 
 class MachineOrderInputSerializer(serializers.Serializer):
-    """Serializer for incoming machine API orders. Only requires order_name + order_id."""
+    """Serializer for incoming machine API orders."""
     order_name = serializers.CharField(
         max_length=100,
         help_text="Recipe name (must match an active Recipe)"
@@ -241,6 +241,10 @@ class MachineOrderInputSerializer(serializers.Serializer):
         max_length=100,
         help_text="External order ID from the calling system"
     )
+    dose_grams = serializers.IntegerField(required=False, min_value=1, max_value=200)
+    grind_grade = serializers.IntegerField(required=False, min_value=1, max_value=11)
+    doser_number = serializers.IntegerField(required=False, min_value=1, max_value=4)
+    recipe_number = serializers.IntegerField(required=False, min_value=1, max_value=4)
 
     def validate_order_name(self, value):
         from .models import Recipe
@@ -255,6 +259,20 @@ class MachineOrderInputSerializer(serializers.Serializer):
                 f"Available recipes: {active_recipes}"
             )
         return value
+
+    def validate(self, data):
+        provided_fields = [
+            field for field in ('dose_grams', 'grind_grade', 'doser_number', 'recipe_number')
+            if field in data
+        ]
+
+        if provided_fields and len(provided_fields) != 4:
+            raise serializers.ValidationError(
+                "To send explicit robot parameters, provide all of: "
+                "dose_grams, grind_grade, doser_number, recipe_number."
+            )
+
+        return data
 
 
 class MachineOrderResponseSerializer(serializers.ModelSerializer):
