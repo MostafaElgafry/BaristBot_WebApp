@@ -44,7 +44,7 @@ class RobotControlBoardSerialClient:
     Thread-safe serial interface to the Robot Control Board.
     """
 
-    _MIN_DOSE, _MAX_DOSE = 1, 100
+    _MIN_DOSE, _MAX_DOSE = 1, 200
     _MIN_GRADE, _MAX_GRADE = 1, 11
     _MIN_DOSER, _MAX_DOSER = 1, 4
     _MIN_RECIPE, _MAX_RECIPE = 1, 4
@@ -606,15 +606,33 @@ def send_manual_order(dose_g: int, grind_grade: int, doser_no: int, recipe_no: i
         result = client.send_job(dose_g, grind_grade, doser_no, recipe_no)
         logger.info(f"[SUCCESS] Order sent successfully (serial): {result}")
 
+        from django.conf import settings
+        tcp_enabled = getattr(settings, 'COBOT_TCP_ENABLED', False)
+        if not tcp_enabled:
+            logger.info("[INFO] COBOT_TCP_ENABLED is false; skipping ethernet socket bridge")
+            return True, result
+
+        tcp_host = getattr(settings, 'COBOT_TCP_HOST', '0.0.0.0')
+        tcp_port = int(getattr(settings, 'COBOT_TCP_PORT', 1233))
+        connect_timeout = float(getattr(settings, 'COBOT_TCP_CONNECT_TIMEOUT', 10.0))
+        response_timeout = float(getattr(settings, 'COBOT_TCP_RESPONSE_TIMEOUT', 30.0))
+
         # Now send commands to the cobot over Ethernet socket
         logger.info("[INFO] Sending the robot commands over ethernet socket")
-        ok, msg = send_tcp_command_to_cobot(doser_no, recipe_no)
+        ok, msg = send_tcp_command_to_cobot(
+            doser_no,
+            recipe_no,
+            host=tcp_host,
+            port=tcp_port,
+            connect_timeout=connect_timeout,
+            response_timeout=response_timeout,
+        )
         if ok:
             logger.info(f"[SUCCESS] Order finished: {msg}")
             return True, msg
-        else:
-            logger.error(f"[ERROR] Ethernet command failed: {msg}")
-            return False, f"Ethernet command failed: {msg}"
+
+        logger.error(f"[ERROR] Ethernet command failed: {msg}")
+        return False, f"Ethernet command failed: {msg}"
     except SerialProtocolError as e:
         logger.error(f"[ERROR] Protocol error: {e}")
         # Check if it's a broken pipe and try reconnect
