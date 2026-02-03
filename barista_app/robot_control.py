@@ -184,8 +184,13 @@ class RobotControlBoardSerialClient:
         start_time = time.monotonic()
         accumulated_data = b""
 
-        # First, wait a bit for data to arrive (like the working script does)
-        time.sleep(0.5)
+        # Poll for incoming data frequently instead of sleeping a single long interval.
+        # This helps catch immediate responses and allows faster reaction if data arrives quickly.
+        poll_deadline = time.monotonic() + 0.5  # short initial window to allow device to start sending
+        while time.monotonic() < poll_deadline:
+            if self._serial.in_waiting > 0:
+                break
+            time.sleep(0.02)
 
         while (time.monotonic() - start_time) < timeout:
             try:
@@ -220,7 +225,29 @@ class RobotControlBoardSerialClient:
                     # Small delay before checking for more data
                     time.sleep(0.1)
                 else:
-                    # No data yet, check if we already have a complete response
+                    # No bytes available now — try a short non-blocking readline as a fallback
+                    try:
+                        original_timeout = getattr(self._serial, 'timeout', None)
+                        # Use a short temporary timeout so we don't block long here
+                        self._serial.timeout = min(0.5, self._read_timeout)
+                        line = self._serial.readline()
+                        if line:
+                            logger.debug(f"[DEBUG] readline got {len(line)} bytes: {line!r}")
+                            accumulated_data += line
+                            decoded = accumulated_data.decode('ascii', errors='replace').strip()
+                            if decoded.upper() in ('ACK', 'OK') or decoded.upper().startswith('ERR') or b'\n' in accumulated_data or b'\r' in accumulated_data:
+                                logger.debug(f"[DEBUG] Line read detected complete response: {decoded}")
+                                return accumulated_data.strip()
+                    except Exception as e:
+                        logger.debug(f"[DEBUG] Short readline failed or returned nothing: {e}")
+                    finally:
+                        # Restore original timeout if possible
+                        try:
+                            self._serial.timeout = original_timeout
+                        except Exception:
+                            pass
+
+                    # Check if we already have a complete response
                     if accumulated_data:
                         decoded = accumulated_data.decode('ascii', errors='replace').strip()
                         if decoded.upper() in ('ACK', 'OK') or decoded.upper().startswith('ERR'):
