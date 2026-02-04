@@ -17,6 +17,8 @@ urlpatterns = [
     path('equipment/', views.equipment_overview, name='equipment-overview'),
     path('equipment/grinders/', views.grinders_list, name='grinders-list'),
     path('equipment/dozers/', views.dozers_list, name='dozers-list'),
+    path('equipment/recipes/', views.recipes_list, name='recipes-list'),
+    path('equipment/coffee-types/', views.coffee_types_list, name='coffee-types-list'),
     path('equipment/tone-machine/', views.tone_machine, name='tone-machine'),
 
     # Inventory

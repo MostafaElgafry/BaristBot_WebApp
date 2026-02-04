@@ -1,0 +1,313 @@
+{% extends 'barista/base.html' %}
+
+{% block title %}Recipes - Barista Robot Control{% endblock %}
+
+{% block content %}
+<div class="top-bar">
+    <h1 class="page-title">
+        <i class="bi bi-cup-hot me-2"></i>Recipe Configuration
+    </h1>
+    <div class="d-flex gap-2">
+        <a href="{% url 'equipment-overview' %}" class="btn btn-outline-secondary">
+            <i class="bi bi-arrow-left me-1"></i> Back
+        </a>
+        <button class="btn btn-primary" onclick="showAddForm()">
+            <i class="bi bi-plus-lg me-1"></i> Add Recipe
+        </button>
+    </div>
+</div>
+
+<div class="row">
+    <!-- Recipes List -->
+    <div class="col-lg-7">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-list me-2"></i>Recipes</span>
+                <span class="badge bg-primary">{{ recipes|length }} Total</span>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Dose (g)</th>
+                                <th>Grind Grade</th>
+                                <th>Doser #</th>
+                                <th>Status</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="recipes-table">
+                            {% for recipe in recipes %}
+                            <tr data-id="{{ recipe.id }}">
+                                <td><strong>{{ recipe.name }}</strong></td>
+                                <td>
+                                    <span class="badge bg-info fs-6">{{ recipe.dose_grams }}g</span>
+                                </td>
+                                <td>
+                                    <div class="progress" style="width: 80px; height: 20px;">
+                                        <div class="progress-bar bg-primary" style="width: {% widthratio recipe.grind_grade 11 100 %}%;">
+                                            {{ recipe.grind_grade }}
+                                        </div>
+                                    </div>
+                                </td>
+                                <td>
+                                    <span class="badge bg-secondary">{{ recipe.doser_number }}</span>
+                                </td>
+                                <td>
+                                    {% if recipe.is_active %}
+                                    <span class="badge bg-success">Active</span>
+                                    {% else %}
+                                    <span class="badge bg-secondary">Inactive</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <button class="btn btn-sm btn-outline-primary" onclick="editRecipe({{ recipe.id }})">
+                                        <i class="bi bi-pencil"></i>
+                                    </button>
+                                    <button class="btn btn-sm btn-outline-danger" onclick="deleteRecipe({{ recipe.id }})">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </td>
+                            </tr>
+                            {% empty %}
+                            <tr>
+                                <td colspan="6" class="text-center text-muted py-4">
+                                    No recipes configured. Click "Add Recipe" to create one.
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit Form -->
+    <div class="col-lg-5">
+        <div class="card" id="edit-form-card" style="display: none;">
+            <div class="card-header">
+                <i class="bi bi-pencil me-2"></i><span id="form-title">Edit Recipe</span>
+            </div>
+            <div class="card-body">
+                <form id="recipe-form">
+                    <input type="hidden" id="recipe-id">
+
+                    <div class="mb-3">
+                        <label class="form-label">Name</label>
+                        <input type="text" class="form-control" id="recipe-name" required
+                               placeholder="Enter recipe name (e.g. Espresso)">
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Description</label>
+                        <textarea class="form-control" id="recipe-description" rows="2"
+                                  placeholder="Optional description"></textarea>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Dose (grams)</label>
+                        <input type="number" class="form-control" id="recipe-dose" required
+                               min="1" max="200" step="1" placeholder="18">
+                        <div class="mt-2">
+                            <small class="text-muted">Quick presets:</small>
+                            <div class="btn-group btn-group-sm mt-1">
+                                <button type="button" class="btn btn-outline-secondary" onclick="setDose(16)">16g</button>
+                                <button type="button" class="btn btn-outline-secondary" onclick="setDose(18)">18g</button>
+                                <button type="button" class="btn btn-outline-secondary" onclick="setDose(20)">20g</button>
+                                <button type="button" class="btn btn-outline-secondary" onclick="setDose(22)">22g</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mb-4">
+                        <label class="form-label">Grind Grade: <strong id="grind-grade-value">5</strong></label>
+                        <input type="range" class="form-range" id="recipe-grind-grade" min="1" max="11" value="5"
+                               oninput="document.getElementById('grind-grade-value').textContent = this.value">
+                        <div class="d-flex justify-content-between text-muted small">
+                            <span>1 (Fine)</span>
+                            <span>11 (Coarse)</span>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Doser Number</label>
+                        <select class="form-select" id="recipe-doser-number" required>
+                            <option value="1">Doser 1</option>
+                            <option value="2">Doser 2</option>
+                            <option value="3">Doser 3</option>
+                            <option value="4">Doser 4</option>
+                        </select>
+                    </div>
+
+                    <div class="mb-4">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="recipe-active" checked>
+                            <label class="form-check-label" for="recipe-active">Active</label>
+                        </div>
+                    </div>
+
+                    <div class="d-flex gap-2">
+                        <button type="submit" class="btn btn-primary flex-grow-1">
+                            <i class="bi bi-check-lg me-1"></i> Save
+                        </button>
+                        <button type="button" class="btn btn-outline-secondary" onclick="hideForm()">
+                            Cancel
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- Number Keypad -->
+        <div class="card mt-3" id="keypad-card" style="display: none;">
+            <div class="card-header">
+                <i class="bi bi-grid-3x3 me-2"></i>Number Pad
+            </div>
+            <div class="card-body">
+                <div class="keypad mx-auto">
+                    <button class="keypad-btn" data-value="1">1</button>
+                    <button class="keypad-btn" data-value="2">2</button>
+                    <button class="keypad-btn" data-value="3">3</button>
+                    <button class="keypad-btn" data-value="4">4</button>
+                    <button class="keypad-btn" data-value="5">5</button>
+                    <button class="keypad-btn" data-value="6">6</button>
+                    <button class="keypad-btn" data-value="7">7</button>
+                    <button class="keypad-btn" data-value="8">8</button>
+                    <button class="keypad-btn" data-value="9">9</button>
+                    <button class="keypad-btn" data-value=".">.</button>
+                    <button class="keypad-btn" data-value="0">0</button>
+                    <button class="keypad-btn action" data-value="backspace"><i class="bi bi-backspace"></i></button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    let currentRecipe = null;
+
+    function setDose(value) {
+        document.getElementById('recipe-dose').value = value;
+    }
+
+    function showAddForm() {
+        currentRecipe = null;
+        document.getElementById('form-title').textContent = 'Add Recipe';
+        document.getElementById('recipe-id').value = '';
+        document.getElementById('recipe-name').value = '';
+        document.getElementById('recipe-description').value = '';
+        document.getElementById('recipe-dose').value = '18';
+        document.getElementById('recipe-grind-grade').value = 5;
+        document.getElementById('grind-grade-value').textContent = '5';
+        document.getElementById('recipe-doser-number').value = '1';
+        document.getElementById('recipe-active').checked = true;
+        document.getElementById('edit-form-card').style.display = 'block';
+        document.getElementById('keypad-card').style.display = 'block';
+    }
+
+    async function editRecipe(id) {
+        try {
+            const response = await fetch(`/api/recipes/${id}/`);
+            const recipe = await response.json();
+
+            currentRecipe = recipe;
+            document.getElementById('form-title').textContent = 'Edit Recipe';
+            document.getElementById('recipe-id').value = recipe.id;
+            document.getElementById('recipe-name').value = recipe.name;
+            document.getElementById('recipe-description').value = recipe.description || '';
+            document.getElementById('recipe-dose').value = recipe.dose_grams;
+            document.getElementById('recipe-grind-grade').value = recipe.grind_grade;
+            document.getElementById('grind-grade-value').textContent = recipe.grind_grade;
+            document.getElementById('recipe-doser-number').value = recipe.doser_number;
+            document.getElementById('recipe-active').checked = recipe.is_active;
+            document.getElementById('edit-form-card').style.display = 'block';
+            document.getElementById('keypad-card').style.display = 'block';
+        } catch (e) {
+            showToast('Failed to load recipe', 'error');
+        }
+    }
+
+    async function deleteRecipe(id) {
+        if (!confirm('Are you sure you want to delete this recipe?')) return;
+
+        try {
+            await fetch(`/api/recipes/${id}/`, {
+                method: 'DELETE',
+                headers: { 'X-CSRFToken': csrftoken }
+            });
+            showToast('Recipe deleted successfully');
+            location.reload();
+        } catch (e) {
+            showToast('Failed to delete recipe', 'error');
+        }
+    }
+
+    function hideForm() {
+        document.getElementById('edit-form-card').style.display = 'none';
+        document.getElementById('keypad-card').style.display = 'none';
+    }
+
+    document.getElementById('recipe-form').addEventListener('submit', async function(e) {
+        e.preventDefault();
+
+        const data = {
+            name: document.getElementById('recipe-name').value,
+            description: document.getElementById('recipe-description').value,
+            dose_grams: parseInt(document.getElementById('recipe-dose').value),
+            grind_grade: parseInt(document.getElementById('recipe-grind-grade').value),
+            doser_number: parseInt(document.getElementById('recipe-doser-number').value),
+            is_active: document.getElementById('recipe-active').checked
+        };
+
+        const id = document.getElementById('recipe-id').value;
+        const url = id ? `/api/recipes/${id}/` : '/api/recipes/';
+        const method = id ? 'PUT' : 'POST';
+
+        try {
+            const response = await fetch(url, {
+                method,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrftoken
+                },
+                body: JSON.stringify(data)
+            });
+
+            if (response.ok) {
+                showToast(id ? 'Recipe updated successfully' : 'Recipe created successfully');
+                location.reload();
+            } else {
+                const error = await response.json();
+                showToast('Error: ' + JSON.stringify(error), 'error');
+            }
+        } catch (e) {
+            showToast('Failed to save recipe', 'error');
+        }
+    });
+
+    // Initialize keypad
+    let activeKeypadInput = null;
+
+    document.getElementById('recipe-dose').addEventListener('focus', function() {
+        activeKeypadInput = this;
+    });
+
+    document.querySelectorAll('.keypad-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            if (!activeKeypadInput) return;
+
+            const value = this.dataset.value;
+            if (value === 'backspace') {
+                activeKeypadInput.value = activeKeypadInput.value.slice(0, -1);
+            } else {
+                activeKeypadInput.value += value;
+            }
+        });
+    });
+</script>
+{% endblock %}

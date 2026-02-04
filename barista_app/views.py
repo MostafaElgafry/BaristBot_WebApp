@@ -107,6 +107,8 @@ def equipment_overview(request):
     grinders = Grinder.objects.filter(is_active=True)
     dozers = Dozer.objects.filter(is_active=True)
     tone_buttons = ToneMachineButton.objects.all()
+    recipes = Recipe.objects.filter(is_active=True)
+    coffee_types = CoffeeType.objects.filter(is_active=True)
 
     return render(request, 'barista/equipment/overview.html', {
         'grinders': grinders,
@@ -114,6 +116,8 @@ def equipment_overview(request):
         'dozers': dozers,
         'dozers_count': dozers.count(),
         'tone_buttons': tone_buttons,
+        'recipes_count': recipes.count(),
+        'coffee_types_count': coffee_types.count(),
     })
 
 
@@ -156,6 +160,26 @@ def tone_machine(request):
     return render(request, 'barista/equipment/tone_machine.html', {
         'buttons': buttons,
         'recipes': recipes,
+    })
+
+
+@login_required
+def recipes_list(request):
+    """Recipe list view."""
+    recipes = Recipe.objects.all()
+
+    return render(request, 'barista/equipment/recipes.html', {
+        'recipes': recipes,
+    })
+
+
+@login_required
+def coffee_types_list(request):
+    """Coffee type list view."""
+    coffee_types = CoffeeType.objects.all()
+
+    return render(request, 'barista/equipment/coffee_types.html', {
+        'coffee_types': coffee_types,
     })
 
 
