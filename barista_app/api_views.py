@@ -299,6 +299,8 @@ class ManualOrderViewSet(viewsets.ModelViewSet):
 
         # Create order record
         order = ManualOrder.objects.create(
+            order_name=serializer.validated_data.get('order_name', ''),
+            external_order_id=serializer.validated_data.get('external_order_id', ''),
             dose_grams=serializer.validated_data['dose_grams'],
             grind_grade=serializer.validated_data['grind_grade'],
             doser_number=serializer.validated_data.get('doser_number', 1),
@@ -627,7 +629,7 @@ class MachineOrderAPIView(APIView):
 
         data = serializer.validated_data
         order_name = data['order_name']
-        external_order_id = data['order_id']
+        external_order_id = data.get('external_order_id') or data['order_id']
 
         # Always resolve recipe by name for canonical order_name.
         recipe = Recipe.objects.get(name__iexact=order_name, is_active=True)

@@ -146,7 +146,8 @@ class ManualOrderSerializer(serializers.ModelSerializer):
     class Meta:
         model = ManualOrder
         fields = [
-            'id', 'dose_grams', 'grind_grade', 'doser_number', 'recipe_number',
+            'id', 'order_name', 'external_order_id',
+            'dose_grams', 'grind_grade', 'doser_number', 'recipe_number',
             'status', 'status_display', 'response_message',
             'created_by', 'created_by_username', 'created_at'
         ]
@@ -240,6 +241,10 @@ class MachineOrderInputSerializer(serializers.Serializer):
     order_id = serializers.CharField(
         max_length=100,
         help_text="External order ID from the calling system"
+    )
+    external_order_id = serializers.CharField(
+        max_length=100, required=False, default='',
+        help_text="External order ID (falls back to order_id if not provided)"
     )
     dose_grams = serializers.IntegerField(required=False, min_value=1, max_value=200)
     grind_grade = serializers.IntegerField(required=False, min_value=1, max_value=11)
