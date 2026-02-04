@@ -661,7 +661,7 @@ def wait_for_order_completion(timeout: float = 60.0) -> tuple[bool, str]:
         return False, f"Unexpected error: {e}"
 
 
-def send_tcp_command_to_cobot(doser_no: int, recipe_no: int, host: str = "192.168.57.10", port: int = 1233, connect_timeout: float = 10.0, response_timeout: float = 30.0) -> tuple[bool, str]:
+def send_tcp_command_to_cobot(doser_no: int, recipe_no: int, server_no: int | None = None, host: str = "192.168.57.10", port: int = 1233, connect_timeout: float = 10.0, response_timeout: float = 30.0) -> tuple[bool, str]:
     """
     Act as a TCP server for the cobot client.
 
@@ -670,20 +670,57 @@ def send_tcp_command_to_cobot(doser_no: int, recipe_no: int, host: str = "192.16
     - The server (this function) should respond with "start" and then send the command parameters.
     - The cobot performs tasks and then sends back "Done" (or similar).
 
-    We bind to the requested host and port (user asked to use 192.168.58.10:1233).
+    This function will choose which coffee server to use (S1..S4) when `server_no`
+    is not provided by calling `check_pre_use()` and selecting the first available
+    server in order 1 → 2 → 3 → 4. If no server is available the function fails.
 
     Returns (True, message) on success where message is the response from the cobot (e.g. "Done").
     Returns (False, error_message) on failure.
     """
 
-    logger.debug(f"[DEBUG] send_tcp_command_to_cobot() called: doser={doser_no}, recipe={recipe_no}, host={host}, port={port}")
+    logger.debug(f"[DEBUG] send_tcp_command_to_cobot() called: doser={doser_no}, recipe={recipe_no}, server_no={server_no}, host={host}, port={port}")
 
     # Simple validation
     try:
         doser_no = int(doser_no)
         recipe_no = int(recipe_no)
+        if server_no is not None:
+            server_no = int(server_no)
     except Exception:
-        return False, "Invalid doser_no or recipe_no (must be integers)"
+        return False, "Invalid doser_no, recipe_no or server_no (must be integers)"
+
+    # Determine server priority if not specified
+    if server_no is None:
+        try:
+            pre = check_pre_use()
+            servers = pre.get("servers", [False, False, False, False])
+            logger.debug(f"[DEBUG] Server availability from CHECK: {servers}")
+            chosen = None
+            for idx, available in enumerate(servers, start=1):
+                if available:
+                    chosen = idx
+                    break
+            if chosen is None:
+                logger.warning("[WARNING] No coffee server available according to CHECK")
+                return False, "No coffee server available"
+            server_no = chosen
+            logger.info(f"[INFO] Selected server S{server_no} based on availability")
+        except Exception as e:
+            logger.error(f"[ERROR] Failed to determine server availability: {e}")
+            return False, f"Failed to determine server availability: {e}"
+    else:
+        if not (1 <= server_no <= 4):
+            return False, "server_no must be 1..4"
+        # Optionally verify the chosen server is available
+        try:
+            pre = check_pre_use()
+            servers = pre.get("servers", [False, False, False, False])
+            if not servers[server_no - 1]:
+                logger.warning(f"[WARNING] Server S{server_no} not available according to CHECK")
+                return False, f"Server S{server_no} is not available"
+        except Exception as e:
+            logger.error(f"[ERROR] Failed to verify server availability: {e}")
+            return False, f"Failed to verify server availability: {e}"
 
     # Create listening socket and wait for client to connect
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -755,6 +792,42 @@ def send_tcp_command_to_cobot(doser_no: int, recipe_no: int, host: str = "192.16
             if not ack_received:
                 logger.warning("[WARNING] ACK not received after start")
                 return False, "ACK not received from client after start"
+
+            # Send SERVER selection and wait for Done
+            try:
+                server_msg = f"S{server_no}"
+                conn.sendall(server_msg.encode('utf-8'))
+                logger.info(f"[INFO] Sent: {server_msg}")
+            except Exception as e:
+                logger.error(f"[ERROR] Failed to send server selection: {e}")
+                return False, f"Send error: {e}"
+
+            # Wait for Done after server selection
+            deadline = time.time() + response_timeout
+            buffer = b""
+            server_done = False
+            while time.time() < deadline:
+                try:
+                    chunk = conn.recv(1024)
+                    if not chunk:
+                        time.sleep(0.05)
+                        continue
+                    buffer += chunk
+                    text = buffer.decode('utf-8', errors='replace').strip()
+                    logger.debug(f"[DEBUG] Waiting for SERVER Done, received: {text}")
+                    if text.lower().startswith("done") or text.lower() in ("done", "ok"):
+                        server_done = True
+                        logger.info(f"[INFO] SERVER completed: {text}")
+                        break
+                except socket.timeout:
+                    continue
+                except Exception as e:
+                    logger.error(f"[ERROR] Error waiting for server completion: {e}")
+                    return False, f"Receive error: {e}"
+
+            if not server_done:
+                logger.warning("[WARNING] Timeout waiting for server completion")
+                return False, "Timeout waiting for server completion"
 
             # Send DOSER command and wait for Done
             try:
