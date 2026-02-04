@@ -793,111 +793,74 @@ def send_tcp_command_to_cobot(doser_no: int, recipe_no: int, server_no: int | No
                 logger.warning("[WARNING] ACK not received after start")
                 return False, "ACK not received from client after start"
 
-            # Send SERVER selection and wait for Done
-            try:
-                server_msg = f"S{server_no}"
-                conn.sendall(server_msg.encode('utf-8'))
-                logger.info(f"[INFO] Sent: {server_msg}")
-            except Exception as e:
-                logger.error(f"[ERROR] Failed to send server selection: {e}")
-                return False, f"Send error: {e}"
-
-            # Wait for Done after server selection
-            deadline = time.time() + response_timeout
-            buffer = b""
-            server_done = False
-            while time.time() < deadline:
+            # Sequence: GO_TO_D -> GO_TO_G1 -> GO_TO_S -> RETURN_TO_D -> RETURN_TO_S -> GO_TO_R
+            def _send_and_wait(msg: str, step_name: str) -> tuple[bool, str]:
+                """Helper to send a message and wait for Done/OK response."""
                 try:
-                    chunk = conn.recv(1024)
-                    if not chunk:
-                        time.sleep(0.05)
-                        continue
-                    buffer += chunk
-                    text = buffer.decode('utf-8', errors='replace').strip()
-                    logger.debug(f"[DEBUG] Waiting for SERVER Done, received: {text}")
-                    if text.lower().startswith("done") or text.lower() in ("done", "ok"):
-                        server_done = True
-                        logger.info(f"[INFO] SERVER completed: {text}")
-                        break
-                except socket.timeout:
-                    continue
+                    payload = msg.encode('utf-8')
+                    logger.info(f"[INFO] Sent: {msg}")
+                    logger.debug(f"[DEBUG] Sending payload for {step_name}: {payload!r} hex:{payload.hex()}")
+                    print(f"Sending: {payload!r}")
+                    conn.sendall(payload)
                 except Exception as e:
-                    logger.error(f"[ERROR] Error waiting for server completion: {e}")
-                    return False, f"Receive error: {e}"
+                    logger.error(f"[ERROR] Failed to send {step_name}: {e}")
+                    return False, f"Send error: {e}"
 
-            if not server_done:
-                logger.warning("[WARNING] Timeout waiting for server completion")
-                return False, "Timeout waiting for server completion"
-
-            # Send DOSER command and wait for Done
-            try:
-                doser_msg = f"D{doser_no}"
-                conn.sendall(doser_msg.encode('utf-8'))
-                logger.info(f"[INFO] Sent: {doser_msg}")
-            except Exception as e:
-                logger.error(f"[ERROR] Failed to send doser: {e}")
-                return False, f"Send error: {e}"
-
-            # Wait for Done after doser action
-            deadline = time.time() + response_timeout
-            buffer = b""
-            doser_done = False
-            while time.time() < deadline:
-                try:
-                    chunk = conn.recv(1024)
-                    if not chunk:
-                        time.sleep(0.05)
+                deadline = time.time() + response_timeout
+                buffer = b""
+                while time.time() < deadline:
+                    try:
+                        chunk = conn.recv(1024)
+                        if not chunk:
+                            time.sleep(0.05)
+                            continue
+                        buffer += chunk
+                        text = buffer.decode('utf-8', errors='replace').strip()
+                        logger.debug(f"[DEBUG] Waiting for {step_name} Done, received: {text}")
+                        if text.lower().startswith("done") or text.lower() in ("done", "ok"):
+                            logger.info(f"[INFO] {step_name} completed: {text}")
+                            return True, text
+                    except socket.timeout:
                         continue
-                    buffer += chunk
-                    text = buffer.decode('utf-8', errors='replace').strip()
-                    logger.debug(f"[DEBUG] Waiting for DOSER Done, received: {text}")
-                    if text.lower().startswith("done") or text.lower() in ("done", "ok"):
-                        doser_done = True
-                        logger.info(f"[INFO] DOSER completed: {text}")
-                        break
-                except socket.timeout:
-                    continue
-                except Exception as e:
-                    logger.error(f"[ERROR] Error waiting for doser completion: {e}")
-                    return False, f"Receive error: {e}"
+                    except Exception as e:
+                        logger.error(f"[ERROR] Error while waiting for {step_name}: {e}")
+                        return False, f"Receive error: {e}"
 
-            if not doser_done:
-                logger.warning("[WARNING] Timeout waiting for doser completion")
-                return False, "Timeout waiting for doser completion"
+                logger.warning(f"[WARNING] Timeout waiting for {step_name} completion")
+                return False, f"Timeout waiting for {step_name} completion"
 
-            # Send RECIPE command and wait for Done
-            try:
-                recipe_msg = f"R{recipe_no}"
-                conn.sendall(recipe_msg.encode('utf-8'))
-                logger.info(f"[INFO] Sent: {recipe_msg}")
-            except Exception as e:
-                logger.error(f"[ERROR] Failed to send recipe: {e}")
-                return False, f"Send error: {e}"
+            # 1) GO_TO_Dn
+            ok, resp = _send_and_wait(f"GO_TO_D{doser_no}", f"GO_TO_D{doser_no}")
+            if not ok:
+                return False, resp
 
-            deadline = time.time() + response_timeout
-            buffer = b""
-            recipe_done = False
-            while time.time() < deadline:
-                try:
-                    chunk = conn.recv(1024)
-                    if not chunk:
-                        time.sleep(0.05)
-                        continue
-                    buffer += chunk
-                    text = buffer.decode('utf-8', errors='replace').strip()
-                    logger.debug(f"[DEBUG] Waiting for RECIPE Done, received: {text}")
-                    if text.lower().startswith("done") or text.lower() in ("done", "ok"):
-                        recipe_done = True
-                        logger.info(f"[INFO] RECIPE completed: {text}")
-                        return True, text
-                except socket.timeout:
-                    continue
-                except Exception as e:
-                    logger.error(f"[ERROR] Error waiting for recipe completion: {e}")
-                    return False, f"Receive error: {e}"
+            # 2) GO_TO_G1
+            ok, resp = _send_and_wait("GO_TO_G1", "GO_TO_G1")
+            if not ok:
+                return False, resp
 
-            logger.warning("[WARNING] Timeout waiting for recipe completion")
-            return False, "Timeout waiting for recipe completion"
+            # 3) GO_TO_Sn
+            ok, resp = _send_and_wait(f"GO_TO_S{server_no}", f"GO_TO_S{server_no}")
+            if not ok:
+                return False, resp
+
+            # 4) RETURN_TO_Dn (only if we previously sent a GO_TO_D)
+            ok, resp = _send_and_wait(f"RETURN_TO_D{doser_no}", f"RETURN_TO_D{doser_no}")
+            if not ok:
+                return False, resp
+
+            # 5) RETURN_TO_Sn
+            ok, resp = _send_and_wait(f"RETURN_TO_S{server_no}", f"RETURN_TO_S{server_no}")
+            if not ok:
+                return False, resp
+
+            # 6) GO_TO_Rn
+            ok, resp = _send_and_wait(f"GO_TO_R{recipe_no}", f"GO_TO_R{recipe_no}")
+            if not ok:
+                return False, resp
+
+            # All steps succeeded
+            return True, resp
 
     except Exception as e:
         logger.error(f"[ERROR] TCP server error: {e}")
