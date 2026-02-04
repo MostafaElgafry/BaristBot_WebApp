@@ -128,14 +128,6 @@ ROBOT_BAUDRATE = int(os.environ.get('ROBOT_BAUDRATE', 115200))
 # Set environment variable ROBOT_DEMO_MODE=true to enable demo/simulation mode
 ROBOT_DEMO_MODE = os.environ.get('ROBOT_DEMO_MODE', 'false').lower() == 'true'
 
-# Optional TCP bridge to cobot client.
-# Disabled by default so manual orders can work with serial-only setups.
-COBOT_TCP_ENABLED = os.environ.get('COBOT_TCP_ENABLED', 'false').lower() == 'true'
-COBOT_TCP_HOST = os.environ.get('COBOT_TCP_HOST', '0.0.0.0')
-COBOT_TCP_PORT = int(os.environ.get('COBOT_TCP_PORT', 1233))
-COBOT_TCP_CONNECT_TIMEOUT = float(os.environ.get('COBOT_TCP_CONNECT_TIMEOUT', 10.0))
-COBOT_TCP_RESPONSE_TIMEOUT = float(os.environ.get('COBOT_TCP_RESPONSE_TIMEOUT', 30.0))
-
 # Machine API Key for machine-to-machine authentication
 # Set via environment variable in production
 MACHINE_API_KEY = os.environ.get('MACHINE_API_KEY', 'egyrobot8000')
