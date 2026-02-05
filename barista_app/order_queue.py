@@ -41,6 +41,45 @@ def get_queue_info():
     }
 
 
+def kick_queue():
+    """
+    Recover from a stuck queue state.
+
+    If there are queued orders but no active order, dispatches the next
+    queued order. This handles cases where the queue gets stuck due to
+    server restarts, failed completions, or other edge cases.
+
+    Returns dict with action taken and result.
+    """
+    with _queue_lock:
+        active = _get_active_order()
+
+        if active is not None:
+            return {
+                'action': 'none',
+                'reason': f'Queue not stuck - order #{active.id} is active',
+            }
+
+        next_order = _get_next_queued_order()
+
+        if next_order is None:
+            return {
+                'action': 'none',
+                'reason': 'No queued orders to dispatch',
+            }
+
+        # Dispatch the next queued order
+        status, message = _dispatch_order(next_order)
+        logger.info(f"Queue kicked: dispatched order #{next_order.id} with status {status}")
+
+        return {
+            'action': 'dispatched',
+            'order_id': next_order.id,
+            'status': status,
+            'message': message,
+        }
+
+
 def enqueue_order(order):
     """
     Attempt to process an order immediately, or queue it.
@@ -48,10 +87,22 @@ def enqueue_order(order):
     If no order is currently active, sends this order to the robot.
     Otherwise, marks it as queued.
 
+    Auto-recovers from stuck queue state: if there are queued orders
+    but no active order, dispatches the oldest queued order first.
+
     Returns (status, message) tuple.
     """
     with _queue_lock:
         active = _get_active_order()
+
+        # Auto-recover: if no active order but there are stuck queued orders,
+        # dispatch the oldest one first
+        if active is None:
+            stuck_order = _get_next_queued_order()
+            if stuck_order:
+                logger.info(f"Auto-recovering stuck queue: dispatching order #{stuck_order.id}")
+                _dispatch_order(stuck_order)
+                active = stuck_order
 
         if active is None:
             return _dispatch_order(order)
