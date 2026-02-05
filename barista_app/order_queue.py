@@ -120,7 +120,17 @@ def enqueue_order(order):
 
 
 def _dispatch_order(order):
-    """Send an order to the robot and update its status."""
+    """
+    Send an order to the robot and update its status.
+
+    Note: send_manual_order() is synchronous - it blocks until the full
+    TCP command sequence completes. When it returns True, the order is
+    actually finished, so we mark it as 'completed' and dispatch the next order.
+    """
+    # Mark as processing before we start (in case of long-running operation)
+    order.status = 'processing'
+    order.save()
+
     success, message = send_manual_order(
         int(order.dose_grams),
         order.grind_grade,
@@ -129,12 +139,13 @@ def _dispatch_order(order):
     )
 
     if success:
-        order.status = 'processing'
+        # Order is actually complete (send_manual_order is synchronous)
+        order.status = 'completed'
         order.response_message = message
         order.save()
         ActivityLog.objects.create(
-            action_type='order_sent',
-            description=f"Order #{order.id} sent to robot via {order.source} API",
+            action_type='order_completed',
+            description=f"Order #{order.id} completed via {order.source} API",
             user=order.created_by,
             metadata={
                 'order_id': order.id,
@@ -145,8 +156,16 @@ def _dispatch_order(order):
                 'source': order.source,
             }
         )
-        logger.info(f"Order #{order.id} dispatched to robot: {message}")
-        return 'processing', message
+        logger.info(f"Order #{order.id} completed: {message}")
+
+        # Dispatch next queued order immediately
+        next_order = _get_next_queued_order()
+        if next_order:
+            logger.info(f"Dispatching next queued order #{next_order.id}")
+            # Recursive call to process next order
+            _dispatch_order(next_order)
+
+        return 'completed', message
     else:
         order.status = 'error'
         order.response_message = message
@@ -158,6 +177,13 @@ def _dispatch_order(order):
             metadata={'order_id': order.id, 'error': message}
         )
         logger.error(f"Order #{order.id} dispatch failed: {message}")
+
+        # Even on error, try to dispatch next order so queue doesn't get stuck
+        next_order = _get_next_queued_order()
+        if next_order:
+            logger.info(f"Dispatching next queued order #{next_order.id} after error")
+            _dispatch_order(next_order)
+
         return 'error', message
 
 
