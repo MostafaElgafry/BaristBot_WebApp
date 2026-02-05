@@ -602,14 +602,16 @@ def send_manual_order(dose_g: int, grind_grade: int, doser_no: int, recipe_no: i
             return False, f"Robot not connected: {e}"
 
     try:
-        # Perform pre-use check FIRST to verify delivery cup and coffee servers are available
-        logger.info("[INFO] Performing pre-use check (CHECK command)...")
+        logger.debug(f"[DEBUG] Sending job to robot...")
+        result = client.send_job(dose_g, grind_grade, doser_no, recipe_no)
+        logger.info(f"[SUCCESS] Order sent successfully (serial): {result}")
+
+        # Perform pre-use check to determine available coffee server
+        logger.info("[INFO] Checking for available coffee server...")
         pre = check_pre_use()
         if not pre.get("ok"):
             logger.error(f"[ERROR] Pre-use check failed: {pre.get('message')}")
             return False, f"Pre-use check failed: {pre.get('message')}"
-
-        logger.info("[INFO] Pre-use check passed, cup and servers verified")
 
         # Select first available server
         servers = pre.get("servers", [False, False, False, False])
@@ -625,14 +627,9 @@ def send_manual_order(dose_g: int, grind_grade: int, doser_no: int, recipe_no: i
 
         logger.info(f"[INFO] Selected coffee server S{server_no}")
 
-        # Now send JOB command to robot after CHECK succeeds
-        logger.debug(f"[DEBUG] Sending JOB command to robot...")
-        result = client.send_job(dose_g, grind_grade, doser_no, recipe_no)
-        logger.info(f"[SUCCESS] JOB command sent successfully (serial): {result}")
-
         # Now send commands to the cobot over Ethernet socket
         logger.info("[INFO] Sending the robot commands over ethernet socket")
-        ok, msg = send_tcp_command_to_cobot(doser_no, recipe_no, server_no, grind_grade)
+        ok, msg = send_tcp_command_to_cobot(doser_no, recipe_no, server_no)
         if ok:
             logger.info(f"[SUCCESS] Order finished: {msg}")
             return True, msg
@@ -685,7 +682,7 @@ def wait_for_order_completion(timeout: float = 60.0) -> tuple[bool, str]:
         return False, f"Unexpected error: {e}"
 
 
-def send_tcp_command_to_cobot(doser_no: int, recipe_no: int, server_no: int, grinder_no: int, host: str = "192.168.57.10", port: int = 1233, connect_timeout: float = 10.0, response_timeout: float = 30.0) -> tuple[bool, str]:
+def send_tcp_command_to_cobot(doser_no: int, recipe_no: int, server_no: int, host: str = "192.168.57.10", port: int = 1233, connect_timeout: float = 300.0, response_timeout: float = 300.0) -> tuple[bool, str]:
     """
     Act as a TCP server for the cobot client.
 
@@ -701,7 +698,6 @@ def send_tcp_command_to_cobot(doser_no: int, recipe_no: int, server_no: int, gri
         doser_no: Doser number (1-4)
         recipe_no: Recipe number (1-4)
         server_no: Coffee server number (1-4), must be pre-determined by caller
-        grinder_no: Grinder number (1-2) used to choose G1 or G2 (must be provided by caller)
         host: TCP server host
         port: TCP server port
         connect_timeout: Timeout for cobot client connection
@@ -711,26 +707,19 @@ def send_tcp_command_to_cobot(doser_no: int, recipe_no: int, server_no: int, gri
     Returns (False, error_message) on failure.
     """
 
-    logger.debug(f"[DEBUG] send_tcp_command_to_cobot() called: doser={doser_no}, recipe={recipe_no}, server_no={server_no}, grinder_no={grinder_no}, host={host}, port={port}")
+    logger.debug(f"[DEBUG] send_tcp_command_to_cobot() called: doser={doser_no}, recipe={recipe_no}, server_no={server_no}, host={host}, port={port}")
 
     # Simple validation
     try:
         doser_no = int(doser_no)
         recipe_no = int(recipe_no)
         server_no = int(server_no)
-        grinder_no = int(grinder_no)
     except Exception:
-        return False, "Invalid doser_no, recipe_no, server_no, or grinder_no (must be integers)"
+        return False, "Invalid doser_no, recipe_no or server_no (must be integers)"
 
     # Validate server_no
     if not (1 <= server_no <= 4):
         return False, "server_no must be 1..4"
-
-    # Validate grinder_no (caller is expected to pass 1 or 2)
-    if grinder_no not in (1, 2):
-        logger.warning(f"[WARNING] Invalid grinder_no {grinder_no} received; expected 1 or 2. Defaulting to 1")
-        grinder_no = 1
-    logger.info(f"[INFO] Using grinder G{grinder_no} (from parameter)")
 
     # Create listening socket and wait for client to connect
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -754,22 +743,7 @@ def send_tcp_command_to_cobot(doser_no: int, recipe_no: int, server_no: int, gri
             logger.info(f"[INFO] Cobot client connected from {addr}")
             conn.settimeout(1.0)
 
-            # Initial handshake from client (expecting "OK" or similar)
-            try:
-                data = conn.recv(1024)
-                if not data:
-                    return False, "No handshake data received from client"
-                recv = data.decode('utf-8', errors='replace').strip()
-                logger.debug(f"[DEBUG] Handshake received: {recv}")
-                logger.info(f"[INFO] Handshake raw bytes: {data!r} hex:{data.hex()} decoded:{recv}")
-                print(f"Handshake raw: {data!r} hex:{data.hex()} decoded: {recv}")
-            except socket.timeout:
-                return False, "Timeout while waiting for client handshake"
-            except Exception as e:
-                logger.error(f"[ERROR] Error reading handshake: {e}")
-                return False, f"Handshake read error: {e}"
-
-            # Send "start" and expect an ACK from the client
+            # Immediately send "start" to initiate handshake, then wait for "ACK"
             try:
                 conn.sendall(b"start")
                 logger.info("[INFO] Sent: start")
@@ -777,7 +751,7 @@ def send_tcp_command_to_cobot(doser_no: int, recipe_no: int, server_no: int, gri
                 logger.error(f"[ERROR] Failed to send 'start': {e}")
                 return False, f"Send error: {e}"
 
-            # Wait for ACK from client
+            # Wait for ACK from client (only 'ACK' expected)
             deadline = time.time() + response_timeout
             ack_received = False
             buffer = b""
@@ -790,9 +764,7 @@ def send_tcp_command_to_cobot(doser_no: int, recipe_no: int, server_no: int, gri
                     buffer += chunk
                     text = buffer.decode('utf-8', errors='replace').strip()
                     logger.debug(f"[DEBUG] Waiting for ACK, received chunk: {text}")
-                    logger.info(f"[INFO] ACK wait - chunk raw: {chunk!r} hex:{chunk.hex()} buffer raw: {buffer!r} buffer_hex:{buffer.hex()} decoded:{text}")
-                    print(f"ACK wait recv chunk: {chunk!r} hex:{chunk.hex()} buffer: {buffer!r}")
-                    if text.lower() in ("ack", "ok"):
+                    if text.lower() == "ack":
                         ack_received = True
                         logger.info(f"[INFO] ACK received from client: {text}")
                         break
@@ -807,7 +779,7 @@ def send_tcp_command_to_cobot(doser_no: int, recipe_no: int, server_no: int, gri
                 logger.warning("[WARNING] ACK not received after start")
                 return False, "ACK not received from client after start"
 
-            # Sequence: GO_TO_D -> GO_TO_Gn -> GO_TO_S -> RETURN_TO_D -> RETURN_TO_S -> GO_TO_R
+            # Sequence: GO_TO_D -> GO_TO_G1 -> GO_TO_S -> RETURN_TO_D -> RETURN_TO_S -> GO_TO_R
             def _send_and_wait(msg: str, step_name: str) -> tuple[bool, str]:
                 """Helper to send a message and wait for Done/OK response."""
                 try:
@@ -831,9 +803,7 @@ def send_tcp_command_to_cobot(doser_no: int, recipe_no: int, server_no: int, gri
                         buffer += chunk
                         text = buffer.decode('utf-8', errors='replace').strip()
                         logger.debug(f"[DEBUG] Waiting for {step_name} Done, received: {text}")
-                        logger.info(f"[INFO] {step_name} recv chunk raw: {chunk!r} hex:{chunk.hex()} buffer raw: {buffer!r} buffer_hex:{buffer.hex()} decoded:{text}")
-                        print(f"{step_name} recv: {chunk!r} hex:{chunk.hex()} buffer: {buffer!r}")
-                        if text.lower().startswith("done") or text.lower() in ("done", "ok"):
+                        if text.lower().startswith("done"):
                             logger.info(f"[INFO] {step_name} completed: {text}")
                             return True, text
                     except socket.timeout:
@@ -850,8 +820,8 @@ def send_tcp_command_to_cobot(doser_no: int, recipe_no: int, server_no: int, gri
             if not ok:
                 return False, resp
 
-            # 2) GO_TO_Gn (dynamic grinder based on grind_grade)
-            ok, resp = _send_and_wait(f"GO_TO_G{grinder_no}", f"GO_TO_G{grinder_no}")
+            # 2) GO_TO_G1
+            ok, resp = _send_and_wait("GO_TO_G1", "GO_TO_G1")
             if not ok:
                 return False, resp
 
