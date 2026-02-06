@@ -685,7 +685,7 @@ def wait_for_order_completion(timeout: float = 60.0) -> tuple[bool, str]:
         return False, f"Unexpected error: {e}"
 
 
-def send_tcp_command_to_cobot(doser_no: int, recipe_no: int, server_no: int, grinder_no: int, host: str = "192.168.57.10", port: int = 1233, connect_timeout: float = 10.0, response_timeout: float = 30.0) -> tuple[bool, str]:
+def send_tcp_command_to_cobot(doser_no: int, recipe_no: int, server_no: int, grinder_no: int, host: str = "192.168.57.10", port: int = 1233, connect_timeout: float = 10.0, response_timeout: float = 300.0) -> tuple[bool, str]:
     """
     Act as a TCP server for the cobot client.
 
@@ -754,20 +754,6 @@ def send_tcp_command_to_cobot(doser_no: int, recipe_no: int, server_no: int, gri
             logger.info(f"[INFO] Cobot client connected from {addr}")
             conn.settimeout(1.0)
 
-            # Initial handshake from client (expecting "OK" or similar)
-            try:
-                data = conn.recv(1024)
-                if not data:
-                    return False, "No handshake data received from client"
-                recv = data.decode('utf-8', errors='replace').strip()
-                logger.debug(f"[DEBUG] Handshake received: {recv}")
-                logger.info(f"[INFO] Handshake raw bytes: {data!r} hex:{data.hex()} decoded:{recv}")
-                print(f"Handshake raw: {data!r} hex:{data.hex()} decoded: {recv}")
-            except socket.timeout:
-                return False, "Timeout while waiting for client handshake"
-            except Exception as e:
-                logger.error(f"[ERROR] Error reading handshake: {e}")
-                return False, f"Handshake read error: {e}"
 
             # Send "start" and expect an ACK from the client
             try:
@@ -792,7 +778,7 @@ def send_tcp_command_to_cobot(doser_no: int, recipe_no: int, server_no: int, gri
                     logger.debug(f"[DEBUG] Waiting for ACK, received chunk: {text}")
                     logger.info(f"[INFO] ACK wait - chunk raw: {chunk!r} hex:{chunk.hex()} buffer raw: {buffer!r} buffer_hex:{buffer.hex()} decoded:{text}")
                     print(f"ACK wait recv chunk: {chunk!r} hex:{chunk.hex()} buffer: {buffer!r}")
-                    if text.lower() in ("ack", "ok"):
+                    if text.lower() in ("ack"):
                         ack_received = True
                         logger.info(f"[INFO] ACK received from client: {text}")
                         break
@@ -833,7 +819,7 @@ def send_tcp_command_to_cobot(doser_no: int, recipe_no: int, server_no: int, gri
                         logger.debug(f"[DEBUG] Waiting for {step_name} Done, received: {text}")
                         logger.info(f"[INFO] {step_name} recv chunk raw: {chunk!r} hex:{chunk.hex()} buffer raw: {buffer!r} buffer_hex:{buffer.hex()} decoded:{text}")
                         print(f"{step_name} recv: {chunk!r} hex:{chunk.hex()} buffer: {buffer!r}")
-                        if text.lower().startswith("done") or text.lower() in ("done", "ok"):
+                        if text.lower().startswith("done") or text.lower() in ("done"):
                             logger.info(f"[INFO] {step_name} completed: {text}")
                             return True, text
                     except socket.timeout:
