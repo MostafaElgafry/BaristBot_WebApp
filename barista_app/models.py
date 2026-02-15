@@ -245,15 +245,24 @@ class ManualOrder(models.Model):
         help_text="Recipe/order name from the calling system"
     )
     dose_grams = models.IntegerField(
-        validators=[MinValueValidator(1), MaxValueValidator(200)]
+        validators=[MinValueValidator(1), MaxValueValidator(200)],
+        default=18,
+        help_text="Auto-resolved from Recipe"
     )
     grind_grade = models.IntegerField(
-        validators=[MinValueValidator(1), MaxValueValidator(11)]
+        validators=[MinValueValidator(1), MaxValueValidator(11)],
+        default=5,
+        help_text="Auto-resolved from Recipe"
     )
     doser_number = models.IntegerField(
         validators=[MinValueValidator(1), MaxValueValidator(4)],
         default=1,
         help_text="Doser number (1-4)"
+    )
+    grinder_number = models.IntegerField(
+        validators=[MinValueValidator(1), MaxValueValidator(4)],
+        default=1,
+        help_text="Grinder number (1-4)"
     )
     recipe_number = models.IntegerField(
         validators=[MinValueValidator(1), MaxValueValidator(4)]
@@ -275,7 +284,7 @@ class ManualOrder(models.Model):
         ordering = ['-created_at']
 
     def __str__(self):
-        return f"Order #{self.id} - {self.dose_grams}g, Grade {self.grind_grade}, Recipe {self.recipe_number}"
+        return f"Order #{self.id} - Doser {self.doser_number}, Grinder {self.grinder_number}, Recipe {self.recipe_number}"
 
 
 class SystemConfiguration(models.Model):

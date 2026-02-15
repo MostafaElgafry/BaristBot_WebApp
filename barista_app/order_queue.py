@@ -132,10 +132,10 @@ def _dispatch_order(order):
     order.save()
 
     success, message = send_manual_order(
-        int(order.dose_grams),
-        order.grind_grade,
         order.doser_number,
+        order.grinder_number,
         order.recipe_number,
+        order_id=order.id,
     )
 
     if success:
@@ -152,6 +152,7 @@ def _dispatch_order(order):
                 'dose': order.dose_grams,
                 'grind_grade': order.grind_grade,
                 'doser_number': order.doser_number,
+                'grinder_number': order.grinder_number,
                 'recipe': order.recipe_number,
                 'source': order.source,
             }
