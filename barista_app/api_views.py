@@ -731,19 +731,11 @@ class MachineQueueStatusAPIView(APIView):
 
     def get(self, request):
         info = get_queue_info()
-        active = info['active_order']
         queued = info['queued_orders']
 
-        # Also check for the most recent completed/error order that
-        # hasn't been acknowledged yet (it's no longer "active" in the
-        # processing sense but still needs /complete/ to advance).
-        ready_order = None
-        if active is None:
-            ready_order = ManualOrder.objects.filter(
-                status__in=['completed', 'error']
-            ).order_by('-created_at').first()
-
-        current = active or ready_order
+        # current_order is either the processing order or the
+        # unacknowledged finished order (both block the queue).
+        current = info['current_order']
         can_complete = current is not None and current.status in ('completed', 'error')
 
         return Response({
