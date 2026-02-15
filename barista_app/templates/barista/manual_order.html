@@ -295,42 +295,6 @@
         // Disable send button
         const sendBtn = document.getElementById('send-btn');
         sendBtn.disabled = true;
-        sendBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Checking...';
-
-        // --- Pre-use check ---
-        try {
-            const checkResp = await fetch('/api/robot/pre-use-check/', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRFToken': csrftoken
-                }
-            });
-            const checkData = await checkResp.json();
-
-            if (!checkData.ok) {
-                const resultCard = document.getElementById('result-card');
-                const resultBody = document.getElementById('result-body');
-                resultBody.innerHTML = `
-                    <div class="alert alert-danger mb-0">
-                        <i class="bi bi-x-circle-fill me-2"></i>
-                        <strong>Pre-use check failed!</strong>
-                        <div class="mt-2">${checkData.message}</div>
-                    </div>
-                `;
-                resultCard.style.display = 'block';
-                sendBtn.disabled = false;
-                sendBtn.innerHTML = '<i class="bi bi-send-fill me-2"></i>Send Order';
-                return;
-            }
-        } catch (e) {
-            showToast('Pre-use check failed — cannot reach robot', 'error');
-            sendBtn.disabled = false;
-            sendBtn.innerHTML = '<i class="bi bi-send-fill me-2"></i>Send Order';
-            return;
-        }
-
-        // --- Send order ---
         sendBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Sending...';
 
         try {
@@ -375,20 +339,18 @@
             const resultCard = document.getElementById('result-card');
             const resultBody = document.getElementById('result-body');
 
-            if (result.status === 'ack') {
+            if (result.status === 'processing') {
                 resultBody.innerHTML = `
                     <div class="alert alert-info mb-0">
-                        <i class="bi bi-check-circle-fill me-2"></i>
-                        <strong>Order acknowledged!</strong>
-                        <div class="mt-2">Robot received the order. Response: ${result.response_message}</div>
+                        <i class="bi bi-gear-fill me-2 spinner-grow spinner-grow-sm"></i>
+                        <strong>Order sent to robot!</strong>
+                        <div class="mt-2">Order #${result.id} is being processed.</div>
                     </div>
                 `;
                 resultCard.style.display = 'block';
-
-                // Wait briefly then refresh to see updated status
                 setTimeout(() => {
                     location.reload();
-                }, 1500);
+                }, 2000);
             } else if (result.status === 'completed') {
                 resultBody.innerHTML = `
                     <div class="alert alert-success mb-0">
@@ -412,23 +374,31 @@
                 resultCard.style.display = 'block';
                 setTimeout(() => {
                     location.reload();
-                }, 1500);
-            } else {
-                // Delay showing error to avoid premature failure messages
+                }, 2000);
+            } else if (result.status === 'error') {
+                resultBody.innerHTML = `
+                    <div class="alert alert-danger mb-0">
+                        <i class="bi bi-x-circle-fill me-2"></i>
+                        <strong>Order failed!</strong>
+                        <div class="mt-2">Error: ${result.response_message}</div>
+                    </div>
+                `;
+                resultCard.style.display = 'block';
                 setTimeout(() => {
-                    resultBody.innerHTML = `
-                        <div class="alert alert-danger mb-0">
-                            <i class="bi bi-x-circle-fill me-2"></i>
-                            <strong>Order failed!</strong>
-                            <div class="mt-2">Error: ${result.response_message}</div>
-                        </div>
-                    `;
-                    resultCard.style.display = 'block';
-                    setTimeout(() => {
-                        location.reload();
-                    }, 2000);
-                }, 2000);  // 2 second delay before showing error
-                return;  // Don't re-enable button until after delay
+                    location.reload();
+                }, 2000);
+            } else {
+                resultBody.innerHTML = `
+                    <div class="alert alert-secondary mb-0">
+                        <i class="bi bi-info-circle-fill me-2"></i>
+                        <strong>Order status: ${result.status}</strong>
+                        <div class="mt-2">${result.response_message || ''}</div>
+                    </div>
+                `;
+                resultCard.style.display = 'block';
+                setTimeout(() => {
+                    location.reload();
+                }, 2000);
             }
 
         } catch (e) {
