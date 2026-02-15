@@ -767,28 +767,73 @@ def _ensure_cobot_server(host: str = "192.168.57.10", port: int = 1233):
     logger.info(f"[INFO] TCP server listening on {host}:{port} (persistent)")
 
 
-def _accept_cobot_connection(connect_timeout: float = 300.0) -> socket.socket:
-    """Accept a new connection from the cobot on the persistent server.
+def _get_cobot_connection(connect_timeout: float = 300.0) -> tuple:
+    """Get a working cobot connection for this order.
 
-    Closes any previous connection first. The cobot reconnects for
-    each order (triggered by the serial JOB command).
+    We don't know whether the cobot keeps the TCP connection alive between
+    orders or reconnects fresh after each JOB command.  This function
+    handles BOTH scenarios:
+
+      1. Try to REUSE the existing connection by sending "start" and
+         waiting for "ACK" (3-second timeout).  If the cobot is still
+         connected and ready, this succeeds immediately.
+
+      2. If reuse fails (connection dead / no ACK), close the old
+         connection and ACCEPT a new one from the persistent server.
+         The cobot's new connection attempt is already queued in the
+         server's backlog (triggered by the JOB command).
+
+    Returns (conn, handshake_done):
+      handshake_done=True  → "start" was sent and ACK received (skip handshake)
+      handshake_done=False → caller must send "start" and wait for ACK
     """
     global _cobot_conn
 
-    # Close previous connection if any
+    # ── Attempt 1: reuse existing connection ──────────────────────
     if _cobot_conn is not None:
+        logger.info("[INFO] Existing cobot connection found, trying to reuse...")
+        reuse_ok = False
+        try:
+            _cobot_conn.sendall(b"start")
+            logger.info("[INFO] Sent 'start' on existing connection, waiting for ACK (3s)...")
+            _cobot_conn.settimeout(3.0)
+            buf = b""
+            deadline = time.time() + 3.0
+            while time.time() < deadline:
+                try:
+                    chunk = _cobot_conn.recv(1024)
+                    if not chunk:
+                        break  # peer closed
+                    buf += chunk
+                    text = buf.decode('utf-8', errors='replace').strip()
+                    if text.lower() == "ack":
+                        logger.info("[INFO] ACK received — reusing existing connection")
+                        _cobot_conn.settimeout(1.0)
+                        reuse_ok = True
+                        break
+                except socket.timeout:
+                    continue
+        except Exception as e:
+            logger.info(f"[INFO] Reuse send failed: {e}")
+
+        if reuse_ok:
+            return _cobot_conn, True
+
+        # Reuse failed — close old connection
+        logger.info("[INFO] Cannot reuse existing connection, will accept new one")
         try:
             _cobot_conn.close()
         except Exception:
             pass
         _cobot_conn = None
 
+    # ── Attempt 2: accept a new connection ────────────────────────
     _cobot_srv.settimeout(connect_timeout)
-    logger.info("[INFO] Waiting for cobot to connect...")
+    logger.info("[INFO] Waiting for new cobot connection...")
     _cobot_conn, addr = _cobot_srv.accept()
     _cobot_conn.settimeout(1.0)
     logger.info(f"[INFO] Cobot connected from {addr}")
-    return _cobot_conn
+    return _cobot_conn, False
 
 
 def close_cobot_connection():
@@ -815,12 +860,12 @@ def send_tcp_command_to_cobot(doser_no: int, grinder_no: int, recipe_no: int, se
     Send movement commands to the cobot over TCP.
 
     The TCP server is persistent (always listening). For each order,
-    we accept a fresh connection — the cobot reconnects after each
-    JOB command.
+    we try to reuse the existing connection first (3s ACK timeout).
+    If reuse fails, we accept a new connection from the server backlog.
 
     Flow per order:
-      1. Accept cobot connection (server already listening)
-      2. Send "start" → cobot replies "ACK"
+      1. Try reuse existing connection OR accept new one
+      2. Send "start" → cobot replies "ACK" (skipped if reuse succeeded)
       3. Send GO_TO_D, GO_TO_G, etc. → cobot replies "Done" each time
 
     Args:
@@ -862,51 +907,53 @@ def send_tcp_command_to_cobot(doser_no: int, grinder_no: int, recipe_no: int, se
         except Exception as e:
             return False, f"Failed to start TCP server: {e}"
 
-        # Accept a fresh connection for this order
+        # Get a working connection (tries reuse, falls back to accept)
         try:
-            conn = _accept_cobot_connection(connect_timeout)
+            conn, handshake_done = _get_cobot_connection(connect_timeout)
         except socket.timeout:
             return False, f"Timeout waiting for cobot to connect on {host}:{port}"
         except Exception as e:
-            return False, f"Failed to accept cobot connection: {e}"
+            return False, f"Failed to get cobot connection: {e}"
 
         try:
             # Handshake: send "start", wait for "ACK"
-            try:
-                conn.sendall(b"start")
-                logger.info("[INFO] Sent: start")
-            except Exception as e:
-                logger.error(f"[ERROR] Failed to send 'start': {e}")
-                _cobot_conn = None
-                return False, f"Send error: {e}"
-
-            deadline = time.time() + response_timeout
-            ack_received = False
-            buffer = b""
-            while time.time() < deadline:
+            # (skipped if _get_cobot_connection already did it via reuse)
+            if not handshake_done:
                 try:
-                    chunk = conn.recv(1024)
-                    if not chunk:
-                        time.sleep(0.05)
-                        continue
-                    buffer += chunk
-                    text = buffer.decode('utf-8', errors='replace').strip()
-                    logger.debug(f"[DEBUG] Waiting for ACK, received: {text}")
-                    if text.lower() == "ack":
-                        ack_received = True
-                        logger.info("[INFO] ACK received from cobot")
-                        break
-                except socket.timeout:
-                    continue
+                    conn.sendall(b"start")
+                    logger.info("[INFO] Sent: start")
                 except Exception as e:
-                    logger.error(f"[ERROR] Error waiting for ACK: {e}")
+                    logger.error(f"[ERROR] Failed to send 'start': {e}")
                     _cobot_conn = None
-                    return False, f"Receive error: {e}"
+                    return False, f"Send error: {e}"
 
-            if not ack_received:
-                logger.warning("[WARNING] ACK not received after start")
-                _cobot_conn = None
-                return False, "ACK not received from cobot after start"
+                deadline = time.time() + response_timeout
+                ack_received = False
+                buffer = b""
+                while time.time() < deadline:
+                    try:
+                        chunk = conn.recv(1024)
+                        if not chunk:
+                            time.sleep(0.05)
+                            continue
+                        buffer += chunk
+                        text = buffer.decode('utf-8', errors='replace').strip()
+                        logger.debug(f"[DEBUG] Waiting for ACK, received: {text}")
+                        if text.lower() == "ack":
+                            ack_received = True
+                            logger.info("[INFO] ACK received from cobot")
+                            break
+                    except socket.timeout:
+                        continue
+                    except Exception as e:
+                        logger.error(f"[ERROR] Error waiting for ACK: {e}")
+                        _cobot_conn = None
+                        return False, f"Receive error: {e}"
+
+                if not ack_received:
+                    logger.warning("[WARNING] ACK not received after start")
+                    _cobot_conn = None
+                    return False, "ACK not received from cobot after start"
 
             # Helper to send a command and wait for "Done"
             def _send_and_wait(msg: str, step_name: str) -> tuple[bool, str]:
