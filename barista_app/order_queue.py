@@ -41,6 +41,45 @@ def get_queue_info():
     }
 
 
+def kick_queue():
+    """
+    Recover from a stuck queue state.
+
+    If there are queued orders but no active order, dispatches the next
+    queued order. This handles cases where the queue gets stuck due to
+    server restarts, failed completions, or other edge cases.
+
+    Returns dict with action taken and result.
+    """
+    with _queue_lock:
+        active = _get_active_order()
+
+        if active is not None:
+            return {
+                'action': 'none',
+                'reason': f'Queue not stuck - order #{active.id} is active',
+            }
+
+        next_order = _get_next_queued_order()
+
+        if next_order is None:
+            return {
+                'action': 'none',
+                'reason': 'No queued orders to dispatch',
+            }
+
+        # Dispatch the next queued order
+        status, message = _dispatch_order(next_order)
+        logger.info(f"Queue kicked: dispatched order #{next_order.id} with status {status}")
+
+        return {
+            'action': 'dispatched',
+            'order_id': next_order.id,
+            'status': status,
+            'message': message,
+        }
+
+
 def enqueue_order(order):
     """
     Attempt to process an order immediately, or queue it.
@@ -48,10 +87,22 @@ def enqueue_order(order):
     If no order is currently active, sends this order to the robot.
     Otherwise, marks it as queued.
 
+    Auto-recovers from stuck queue state: if there are queued orders
+    but no active order, dispatches the oldest queued order first.
+
     Returns (status, message) tuple.
     """
     with _queue_lock:
         active = _get_active_order()
+
+        # Auto-recover: if no active order but there are stuck queued orders,
+        # dispatch the oldest one first
+        if active is None:
+            stuck_order = _get_next_queued_order()
+            if stuck_order:
+                logger.info(f"Auto-recovering stuck queue: dispatching order #{stuck_order.id}")
+                _dispatch_order(stuck_order)
+                active = stuck_order
 
         if active is None:
             return _dispatch_order(order)
@@ -69,45 +120,87 @@ def enqueue_order(order):
 
 
 def _dispatch_order(order):
-    """Send an order to the robot and update its status."""
-    success, message = send_manual_order(
-        int(order.dose_grams),
-        order.grind_grade,
-        order.doser_number,
-        order.recipe_number,
-    )
+    """
+    Send an order to the robot in a background thread.
 
-    if success:
-        order.status = 'processing'
-        order.response_message = message
-        order.save()
-        ActivityLog.objects.create(
-            action_type='order_sent',
-            description=f"Order #{order.id} sent to robot via {order.source} API",
-            user=order.created_by,
-            metadata={
-                'order_id': order.id,
-                'dose': order.dose_grams,
-                'grind_grade': order.grind_grade,
-                'doser_number': order.doser_number,
-                'recipe': order.recipe_number,
-                'source': order.source,
-            }
-        )
-        logger.info(f"Order #{order.id} dispatched to robot: {message}")
-        return 'processing', message
-    else:
-        order.status = 'error'
-        order.response_message = message
-        order.save()
-        ActivityLog.objects.create(
-            action_type='order_failed',
-            description=f"Order #{order.id} failed: {message}",
-            user=order.created_by,
-            metadata={'order_id': order.id, 'error': message}
-        )
-        logger.error(f"Order #{order.id} dispatch failed: {message}")
-        return 'error', message
+    Marks the order as 'processing' and returns immediately.
+    The actual robot work (serial + TCP) runs in a daemon thread.
+    When done, the caller should hit the complete endpoint to mark
+    the order as completed and dispatch the next queued order.
+    """
+    order.status = 'processing'
+    order.response_message = 'Dispatched to robot'
+    order.save()
+
+    def _run_order():
+        """Background worker: send commands to robot, update order on finish."""
+        try:
+            success, message = send_manual_order(
+                order.doser_number,
+                order.grinder_number,
+                order.recipe_number,
+                order_id=order.id,
+            )
+
+            # Refresh from DB in case it was modified
+            order.refresh_from_db()
+
+            if success:
+                order.status = 'completed'
+                order.response_message = message
+                order.save()
+                ActivityLog.objects.create(
+                    action_type='order_completed',
+                    description=f"Order #{order.id} completed via {order.source} API",
+                    user=order.created_by,
+                    metadata={
+                        'order_id': order.id,
+                        'dose': order.dose_grams,
+                        'grind_grade': order.grind_grade,
+                        'doser_number': order.doser_number,
+                        'grinder_number': order.grinder_number,
+                        'recipe': order.recipe_number,
+                        'source': order.source,
+                    }
+                )
+                logger.info(f"Order #{order.id} completed: {message}")
+
+                # Dispatch next queued order
+                next_order = _get_next_queued_order()
+                if next_order:
+                    logger.info(f"Dispatching next queued order #{next_order.id}")
+                    _dispatch_order(next_order)
+            else:
+                order.status = 'error'
+                order.response_message = message
+                order.save()
+                ActivityLog.objects.create(
+                    action_type='order_failed',
+                    description=f"Order #{order.id} failed: {message}",
+                    user=order.created_by,
+                    metadata={'order_id': order.id, 'error': message}
+                )
+                logger.error(f"Order #{order.id} dispatch failed: {message}")
+
+                # Even on error, dispatch next so queue doesn't get stuck
+                next_order = _get_next_queued_order()
+                if next_order:
+                    logger.info(f"Dispatching next queued order #{next_order.id} after error")
+                    _dispatch_order(next_order)
+        except Exception as e:
+            logger.exception(f"[ERROR] Background order #{order.id} crashed: {e}")
+            try:
+                order.refresh_from_db()
+                order.status = 'error'
+                order.response_message = f"Unexpected error: {e}"
+                order.save()
+            except Exception:
+                pass
+
+    worker = threading.Thread(target=_run_order, daemon=True)
+    worker.start()
+
+    return 'processing', 'Order dispatched to robot'
 
 
 def complete_order(order_id):

@@ -147,25 +147,24 @@ class ManualOrderSerializer(serializers.ModelSerializer):
         model = ManualOrder
         fields = [
             'id', 'order_name', 'external_order_id',
-            'dose_grams', 'grind_grade', 'doser_number', 'recipe_number',
+            'dose_grams', 'grind_grade', 'doser_number', 'grinder_number',
+            'recipe_number',
             'status', 'status_display', 'response_message',
             'created_by', 'created_by_username', 'created_at'
         ]
-        read_only_fields = ['id', 'status', 'response_message', 'created_by', 'created_at']
-
-    def validate_dose_grams(self, value):
-        if not 1 <= value <= 200:
-            raise serializers.ValidationError("Dose must be between 1 and 200 grams")
-        return int(value)
-
-    def validate_grind_grade(self, value):
-        if not 1 <= value <= 11:
-            raise serializers.ValidationError("Grind grade must be between 1 and 11")
-        return value
+        read_only_fields = [
+            'id', 'dose_grams', 'grind_grade',
+            'status', 'response_message', 'created_by', 'created_at'
+        ]
 
     def validate_doser_number(self, value):
         if not 1 <= value <= 4:
             raise serializers.ValidationError("Doser number must be between 1 and 4")
+        return value
+
+    def validate_grinder_number(self, value):
+        if not 1 <= value <= 4:
+            raise serializers.ValidationError("Grinder number must be between 1 and 4")
         return value
 
     def validate_recipe_number(self, value):
@@ -246,9 +245,8 @@ class MachineOrderInputSerializer(serializers.Serializer):
         max_length=100, required=False, default='',
         help_text="External order ID (falls back to order_id if not provided)"
     )
-    dose_grams = serializers.IntegerField(required=False, min_value=1, max_value=200)
-    grind_grade = serializers.IntegerField(required=False, min_value=1, max_value=11)
     doser_number = serializers.IntegerField(required=False, min_value=1, max_value=4)
+    grinder_number = serializers.IntegerField(required=False, min_value=1, max_value=4)
     recipe_number = serializers.IntegerField(required=False, min_value=1, max_value=4)
 
     def validate_order_name(self, value):
@@ -265,20 +263,6 @@ class MachineOrderInputSerializer(serializers.Serializer):
             )
         return value
 
-    def validate(self, data):
-        provided_fields = [
-            field for field in ('dose_grams', 'grind_grade', 'doser_number', 'recipe_number')
-            if field in data
-        ]
-
-        if provided_fields and len(provided_fields) != 4:
-            raise serializers.ValidationError(
-                "To send explicit robot parameters, provide all of: "
-                "dose_grams, grind_grade, doser_number, recipe_number."
-            )
-
-        return data
-
 
 class MachineOrderResponseSerializer(serializers.ModelSerializer):
     """Serializer for machine API order responses."""
@@ -288,7 +272,8 @@ class MachineOrderResponseSerializer(serializers.ModelSerializer):
         model = ManualOrder
         fields = [
             'id', 'external_order_id', 'order_name',
-            'dose_grams', 'grind_grade', 'doser_number', 'recipe_number',
+            'dose_grams', 'grind_grade', 'doser_number', 'grinder_number',
+            'recipe_number',
             'status', 'status_display', 'source', 'response_message', 'created_at'
         ]
 

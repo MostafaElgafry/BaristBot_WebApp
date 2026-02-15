@@ -22,41 +22,6 @@
             </div>
             <div class="card-body">
                 <form id="order-form">
-                    <!-- Dose Input -->
-                    <div class="mb-4">
-                        <label class="form-label fw-bold">Dose (grams)</label>
-                        <div class="input-group input-group-lg mb-2">
-                            <input type="number" class="form-control" id="dose-input"
-                                   value="18" min="1" max="200" step="1"
-                                   onfocus="setActiveInput(this)" required>
-                            <span class="input-group-text">g</span>
-                        </div>
-                        <div class="btn-group w-100" role="group">
-                            <button type="button" class="btn btn-outline-secondary" onclick="setDose(16)">16g</button>
-                            <button type="button" class="btn btn-outline-secondary" onclick="setDose(18)">18g</button>
-                            <button type="button" class="btn btn-outline-secondary" onclick="setDose(20)">20g</button>
-                            <button type="button" class="btn btn-outline-secondary" onclick="setDose(22)">22g</button>
-                        </div>
-                    </div>
-
-                    <!-- Grind Grade -->
-                    <div class="mb-4">
-                        <label class="form-label fw-bold">Grind Grade</label>
-                        <div class="d-flex align-items-center gap-3">
-                            <button type="button" class="btn btn-outline-primary btn-lg" onclick="adjustGrade(-1)">
-                                <i class="bi bi-dash-lg"></i>
-                            </button>
-                            <div class="text-center flex-grow-1">
-                                <div class="display-4" id="grade-display">5</div>
-                                <small class="text-muted">1 (Fine) to 11 (Coarse)</small>
-                            </div>
-                            <button type="button" class="btn btn-outline-primary btn-lg" onclick="adjustGrade(1)">
-                                <i class="bi bi-plus-lg"></i>
-                            </button>
-                        </div>
-                        <input type="hidden" id="grade-input" value="5">
-                    </div>
-
                     <!-- Doser Number -->
                     <div class="mb-4">
                         <label class="form-label fw-bold">Doser Number</label>
@@ -83,6 +48,34 @@
                             </div>
                         </div>
                         <input type="hidden" id="doser-input" value="1">
+                    </div>
+
+                    <!-- Grinder Number -->
+                    <div class="mb-4">
+                        <label class="form-label fw-bold">Grinder Number</label>
+                        <div class="row g-2">
+                            <div class="col-3">
+                                <button type="button" class="btn btn-outline-success btn-lg w-100 py-3 grinder-btn active" data-grinder="1">
+                                    <div class="display-6">1</div>
+                                </button>
+                            </div>
+                            <div class="col-3">
+                                <button type="button" class="btn btn-outline-success btn-lg w-100 py-3 grinder-btn" data-grinder="2">
+                                    <div class="display-6">2</div>
+                                </button>
+                            </div>
+                            <div class="col-3">
+                                <button type="button" class="btn btn-outline-success btn-lg w-100 py-3 grinder-btn" data-grinder="3">
+                                    <div class="display-6">3</div>
+                                </button>
+                            </div>
+                            <div class="col-3">
+                                <button type="button" class="btn btn-outline-success btn-lg w-100 py-3 grinder-btn" data-grinder="4">
+                                    <div class="display-6">4</div>
+                                </button>
+                            </div>
+                        </div>
+                        <input type="hidden" id="grinder-input" value="1">
                     </div>
 
                     <!-- Recipe Number -->
@@ -142,35 +135,9 @@
         </div>
     </div>
 
-    <!-- Number Keypad & Recent Orders -->
+    <!-- Recent Orders -->
     <div class="col-lg-5">
-        <!-- Number Keypad -->
         <div class="card">
-            <div class="card-header">
-                <i class="bi bi-grid-3x3 me-2"></i>Number Pad
-            </div>
-            <div class="card-body">
-                <div class="keypad mx-auto">
-                    <button type="button" class="keypad-btn" data-value="1">1</button>
-                    <button type="button" class="keypad-btn" data-value="2">2</button>
-                    <button type="button" class="keypad-btn" data-value="3">3</button>
-                    <button type="button" class="keypad-btn" data-value="4">4</button>
-                    <button type="button" class="keypad-btn" data-value="5">5</button>
-                    <button type="button" class="keypad-btn" data-value="6">6</button>
-                    <button type="button" class="keypad-btn" data-value="7">7</button>
-                    <button type="button" class="keypad-btn" data-value="8">8</button>
-                    <button type="button" class="keypad-btn" data-value="9">9</button>
-                    <button type="button" class="keypad-btn action" data-value="clear">C</button>
-                    <button type="button" class="keypad-btn" data-value="0">0</button>
-                    <button type="button" class="keypad-btn action" data-value="backspace">
-                        <i class="bi bi-backspace"></i>
-                    </button>
-                </div>
-            </div>
-        </div>
-
-        <!-- Recent Orders -->
-        <div class="card mt-3">
             <div class="card-header">
                 <i class="bi bi-clock-history me-2"></i>Recent Orders
             </div>
@@ -180,9 +147,8 @@
                         <thead>
                             <tr>
                                 <th>Time</th>
-                                <th>Dose</th>
-                                <th>Grade</th>
                                 <th>Doser</th>
+                                <th>Grinder</th>
                                 <th>Recipe</th>
                                 <th>Status</th>
                             </tr>
@@ -191,9 +157,8 @@
                             {% for order in recent_orders %}
                             <tr>
                                 <td>{{ order.created_at|time:"H:i" }}</td>
-                                <td>{{ order.dose_grams }}g</td>
-                                <td>{{ order.grind_grade }}</td>
                                 <td>#{{ order.doser_number }}</td>
+                                <td>#{{ order.grinder_number }}</td>
                                 <td>#{{ order.recipe_number }}</td>
                                 <td>
                                     {% if order.status == 'ack' %}
@@ -211,7 +176,7 @@
                             </tr>
                             {% empty %}
                             <tr>
-                                <td colspan="6" class="text-center text-muted py-3">
+                                <td colspan="5" class="text-center text-muted py-3">
                                     No recent orders
                                 </td>
                             </tr>
@@ -235,9 +200,8 @@
             <div class="modal-body">
                 <p>Are you sure you want to send this order to the robot?</p>
                 <ul class="list-unstyled">
-                    <li><strong>Dose:</strong> <span id="confirm-dose"></span>g</li>
-                    <li><strong>Grind Grade:</strong> <span id="confirm-grade"></span></li>
                     <li><strong>Doser:</strong> #<span id="confirm-doser"></span></li>
+                    <li><strong>Grinder:</strong> #<span id="confirm-grinder"></span></li>
                     <li><strong>Recipe:</strong> #<span id="confirm-recipe"></span></li>
                 </ul>
             </div>
@@ -254,24 +218,9 @@
 
 {% block extra_js %}
 <script>
-    let activeInput = null;
-    let currentGrade = 5;
     let currentDoser = 1;
+    let currentGrinder = 1;
     let currentRecipe = 1;
-
-    function setActiveInput(input) {
-        activeInput = input;
-    }
-
-    function setDose(value) {
-        document.getElementById('dose-input').value = value;
-    }
-
-    function adjustGrade(delta) {
-        currentGrade = Math.min(11, Math.max(1, currentGrade + delta));
-        document.getElementById('grade-display').textContent = currentGrade;
-        document.getElementById('grade-input').value = currentGrade;
-    }
 
     // Doser buttons
     document.querySelectorAll('.doser-btn').forEach(btn => {
@@ -280,6 +229,16 @@
             this.classList.add('active');
             currentDoser = parseInt(this.dataset.doser);
             document.getElementById('doser-input').value = currentDoser;
+        });
+    });
+
+    // Grinder buttons
+    document.querySelectorAll('.grinder-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            document.querySelectorAll('.grinder-btn').forEach(b => b.classList.remove('active'));
+            this.classList.add('active');
+            currentGrinder = parseInt(this.dataset.grinder);
+            document.getElementById('grinder-input').value = currentGrinder;
         });
     });
 
@@ -293,38 +252,22 @@
         });
     });
 
-    // Keypad handler
-    document.querySelectorAll('.keypad-btn').forEach(btn => {
-        btn.addEventListener('click', function() {
-            if (!activeInput) {
-                activeInput = document.getElementById('dose-input');
-            }
-
-            const value = this.dataset.value;
-
-            if (value === 'backspace') {
-                activeInput.value = activeInput.value.slice(0, -1);
-            } else if (value === 'clear') {
-                activeInput.value = '';
-            } else {
-                activeInput.value += value;
-            }
-        });
-    });
-
     function resetForm() {
-        document.getElementById('dose-input').value = '18';
-        currentGrade = 5;
-        document.getElementById('grade-display').textContent = '5';
-        document.getElementById('grade-input').value = '5';
         currentDoser = 1;
         document.querySelectorAll('.doser-btn').forEach(b => b.classList.remove('active'));
         document.querySelector('[data-doser="1"]').classList.add('active');
         document.getElementById('doser-input').value = '1';
+
+        currentGrinder = 1;
+        document.querySelectorAll('.grinder-btn').forEach(b => b.classList.remove('active'));
+        document.querySelector('[data-grinder="1"]').classList.add('active');
+        document.getElementById('grinder-input').value = '1';
+
+        currentRecipe = 1;
         document.querySelectorAll('.recipe-btn').forEach(b => b.classList.remove('active'));
         document.querySelector('[data-recipe="1"]').classList.add('active');
-        currentRecipe = 1;
         document.getElementById('recipe-input').value = '1';
+
         document.getElementById('result-card').style.display = 'none';
     }
 
@@ -332,15 +275,9 @@
     document.getElementById('order-form').addEventListener('submit', function(e) {
         e.preventDefault();
 
-        const dose = parseInt(document.getElementById('dose-input').value);
-        const grade = currentGrade;
-        const doser = currentDoser;
-        const recipe = currentRecipe;
-
-        document.getElementById('confirm-dose').textContent = dose;
-        document.getElementById('confirm-grade').textContent = grade;
-        document.getElementById('confirm-doser').textContent = doser;
-        document.getElementById('confirm-recipe').textContent = recipe;
+        document.getElementById('confirm-doser').textContent = currentDoser;
+        document.getElementById('confirm-grinder').textContent = currentGrinder;
+        document.getElementById('confirm-recipe').textContent = currentRecipe;
 
         const modal = new bootstrap.Modal(document.getElementById('confirmModal'));
         modal.show();
@@ -348,15 +285,9 @@
 
     // Confirm send
     document.getElementById('confirm-send-btn').addEventListener('click', async function() {
-        const dose = parseInt(document.getElementById('dose-input').value);
-        const grade = currentGrade;
         const doser = currentDoser;
+        const grinder = currentGrinder;
         const recipe = currentRecipe;
-
-        if (!Number.isInteger(dose) || dose < 1 || dose > 200) {
-            showToast('Dose must be a number between 1 and 200', 'error');
-            return;
-        }
 
         // Close modal
         bootstrap.Modal.getInstance(document.getElementById('confirmModal')).hide();
@@ -364,42 +295,6 @@
         // Disable send button
         const sendBtn = document.getElementById('send-btn');
         sendBtn.disabled = true;
-        sendBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Checking...';
-
-        // --- Pre-use check ---
-        try {
-            const checkResp = await fetch('/api/robot/pre-use-check/', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRFToken': csrftoken
-                }
-            });
-            const checkData = await checkResp.json();
-
-            if (!checkData.ok) {
-                const resultCard = document.getElementById('result-card');
-                const resultBody = document.getElementById('result-body');
-                resultBody.innerHTML = `
-                    <div class="alert alert-danger mb-0">
-                        <i class="bi bi-x-circle-fill me-2"></i>
-                        <strong>Pre-use check failed!</strong>
-                        <div class="mt-2">${checkData.message}</div>
-                    </div>
-                `;
-                resultCard.style.display = 'block';
-                sendBtn.disabled = false;
-                sendBtn.innerHTML = '<i class="bi bi-send-fill me-2"></i>Send Order';
-                return;
-            }
-        } catch (e) {
-            showToast('Pre-use check failed — cannot reach robot', 'error');
-            sendBtn.disabled = false;
-            sendBtn.innerHTML = '<i class="bi bi-send-fill me-2"></i>Send Order';
-            return;
-        }
-
-        // --- Send order ---
         sendBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Sending...';
 
         try {
@@ -410,9 +305,8 @@
                     'X-CSRFToken': csrftoken
                 },
                 body: JSON.stringify({
-                    dose_grams: dose,
-                    grind_grade: grade,
                     doser_number: doser,
+                    grinder_number: grinder,
                     recipe_number: recipe
                 })
             });
@@ -445,20 +339,18 @@
             const resultCard = document.getElementById('result-card');
             const resultBody = document.getElementById('result-body');
 
-            if (result.status === 'ack') {
+            if (result.status === 'processing') {
                 resultBody.innerHTML = `
                     <div class="alert alert-info mb-0">
-                        <i class="bi bi-check-circle-fill me-2"></i>
-                        <strong>Order acknowledged!</strong>
-                        <div class="mt-2">Robot received the order. Response: ${result.response_message}</div>
+                        <i class="bi bi-gear-fill me-2 spinner-grow spinner-grow-sm"></i>
+                        <strong>Order sent to robot!</strong>
+                        <div class="mt-2">Order #${result.id} is being processed.</div>
                     </div>
                 `;
                 resultCard.style.display = 'block';
-
-                // Wait briefly then refresh to see updated status
                 setTimeout(() => {
                     location.reload();
-                }, 1500);
+                }, 2000);
             } else if (result.status === 'completed') {
                 resultBody.innerHTML = `
                     <div class="alert alert-success mb-0">
@@ -471,22 +363,42 @@
                 setTimeout(() => {
                     location.reload();
                 }, 1500);
-            } else {
-                // Delay showing error to avoid premature failure messages
+            } else if (result.status === 'queued') {
+                resultBody.innerHTML = `
+                    <div class="alert alert-warning mb-0">
+                        <i class="bi bi-hourglass-split me-2"></i>
+                        <strong>Order queued!</strong>
+                        <div class="mt-2">${result.response_message}</div>
+                    </div>
+                `;
+                resultCard.style.display = 'block';
                 setTimeout(() => {
-                    resultBody.innerHTML = `
-                        <div class="alert alert-danger mb-0">
-                            <i class="bi bi-x-circle-fill me-2"></i>
-                            <strong>Order failed!</strong>
-                            <div class="mt-2">Error: ${result.response_message}</div>
-                        </div>
-                    `;
-                    resultCard.style.display = 'block';
-                    setTimeout(() => {
-                        location.reload();
-                    }, 2000);
-                }, 2000);  // 2 second delay before showing error
-                return;  // Don't re-enable button until after delay
+                    location.reload();
+                }, 2000);
+            } else if (result.status === 'error') {
+                resultBody.innerHTML = `
+                    <div class="alert alert-danger mb-0">
+                        <i class="bi bi-x-circle-fill me-2"></i>
+                        <strong>Order failed!</strong>
+                        <div class="mt-2">Error: ${result.response_message}</div>
+                    </div>
+                `;
+                resultCard.style.display = 'block';
+                setTimeout(() => {
+                    location.reload();
+                }, 2000);
+            } else {
+                resultBody.innerHTML = `
+                    <div class="alert alert-secondary mb-0">
+                        <i class="bi bi-info-circle-fill me-2"></i>
+                        <strong>Order status: ${result.status}</strong>
+                        <div class="mt-2">${result.response_message || ''}</div>
+                    </div>
+                `;
+                resultCard.style.display = 'block';
+                setTimeout(() => {
+                    location.reload();
+                }, 2000);
             }
 
         } catch (e) {

@@ -25,7 +25,7 @@ from .serializers import (
     SystemSettingsSerializer, ActivityLogSerializer, AnalyticsDailySerializer,
     DashboardSerializer
 )
-from .robot_control import send_manual_order, check_robot_connection, wait_for_order_completion, check_pre_use
+from .robot_control import check_robot_connection, wait_for_order_completion, check_pre_use
 from .order_queue import enqueue_order, complete_order, get_queue_info
 
 
@@ -297,52 +297,42 @@ class ManualOrderViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
+        recipe_no = serializer.validated_data['recipe_number']
+
+        # Auto-resolve dose_grams and grind_grade from Recipe via ToneMachineButton
+        try:
+            button = ToneMachineButton.objects.get(button_number=recipe_no, is_active=True)
+        except ToneMachineButton.DoesNotExist:
+            return Response(
+                {'recipe_number': [f"No active ToneMachineButton for button {recipe_no}"]},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        if button.recipe is None:
+            return Response(
+                {'recipe_number': [f"ToneMachineButton {recipe_no} has no recipe assigned"]},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        dose_grams = button.recipe.dose_grams
+        grind_grade = button.recipe.grind_grade
+
         # Create order record
         order = ManualOrder.objects.create(
             order_name=serializer.validated_data.get('order_name', ''),
             external_order_id=serializer.validated_data.get('external_order_id', ''),
-            dose_grams=serializer.validated_data['dose_grams'],
-            grind_grade=serializer.validated_data['grind_grade'],
+            dose_grams=dose_grams,
+            grind_grade=grind_grade,
             doser_number=serializer.validated_data.get('doser_number', 1),
-            recipe_number=serializer.validated_data['recipe_number'],
+            grinder_number=serializer.validated_data.get('grinder_number', 1),
+            recipe_number=recipe_no,
             status='pending',
             created_by=request.user
         )
 
-        # Send to robot
-        success, message = send_manual_order(
-            int(order.dose_grams),
-            order.grind_grade,
-            order.doser_number,
-            order.recipe_number
-        )
+        # Use order queue instead of direct send
+        order_status, message = enqueue_order(order)
+        order.refresh_from_db()
 
-        if success:
-            order.status = 'ack'
-            order.response_message = message
-            ActivityLog.objects.create(
-                action_type='order_sent',
-                description=f"Manual order #{order.id} acknowledged by robot",
-                user=request.user,
-                metadata={
-                    'order_id': order.id,
-                    'dose': order.dose_grams,
-                    'grind_grade': order.grind_grade,
-                    'doser_number': order.doser_number,
-                    'recipe': order.recipe_number
-                }
-            )
-        else:
-            order.status = 'error'
-            order.response_message = message
-            ActivityLog.objects.create(
-                action_type='order_failed',
-                description=f"Manual order #{order.id} failed: {message}",
-                user=request.user,
-                metadata={'order_id': order.id, 'error': message}
-            )
-
-        order.save()
         return Response(
             ManualOrderSerializer(order).data,
             status=status.HTTP_201_CREATED
@@ -610,9 +600,9 @@ class MachineOrderAPIView(APIView):
     """
     Machine-to-machine API for placing orders.
 
-    Accepts `order_name` + `order_id` and can optionally accept explicit
-    robot parameters (`dose_grams`, `grind_grade`, `doser_number`, `recipe_number`).
-    If explicit parameters are omitted, robot parameters are resolved from recipe config.
+    Accepts `order_name` + `order_id`. Dose and grind grade are always
+    auto-resolved from the Recipe configuration. Optional overrides:
+    `doser_number`, `grinder_number`, `recipe_number`.
 
     The machine can only process one order at a time.
     If the machine is busy, the order is added to a queue.
@@ -634,22 +624,20 @@ class MachineOrderAPIView(APIView):
         # Always resolve recipe by name for canonical order_name.
         recipe = Recipe.objects.get(name__iexact=order_name, is_active=True)
 
-        # Mode A: caller provides explicit robot params (manual-order style).
-        if all(field in data for field in ('dose_grams', 'grind_grade', 'doser_number', 'recipe_number')):
-            dose_grams = data['dose_grams']
-            grind_grade = data['grind_grade']
-            doser_number = data['doser_number']
-            recipe_number = data['recipe_number']
-        # Mode B: legacy mode (order_name + order_id only), resolve from recipe/button mapping.
-        else:
-            recipe_number = recipe.get_recipe_number()
-            if recipe_number is None:
-                return Response({
-                    'error': f"Recipe '{recipe.name}' is not assigned to any active tone machine button."
-                }, status=status.HTTP_400_BAD_REQUEST)
-            dose_grams = recipe.dose_grams
-            grind_grade = recipe.grind_grade
-            doser_number = recipe.doser_number
+        # Resolve recipe_number from ToneMachineButton mapping
+        recipe_number = data.get('recipe_number') or recipe.get_recipe_number()
+        if recipe_number is None:
+            return Response({
+                'error': f"Recipe '{recipe.name}' is not assigned to any active tone machine button."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Always resolve dose_grams and grind_grade from the recipe
+        dose_grams = recipe.dose_grams
+        grind_grade = recipe.grind_grade
+
+        # Use overrides or defaults for doser/grinder
+        doser_number = data.get('doser_number', recipe.doser_number)
+        grinder_number = data.get('grinder_number', 1)
 
         order = ManualOrder.objects.create(
             external_order_id=external_order_id,
@@ -657,6 +645,7 @@ class MachineOrderAPIView(APIView):
             dose_grams=dose_grams,
             grind_grade=grind_grade,
             doser_number=doser_number,
+            grinder_number=grinder_number,
             recipe_number=recipe_number,
             status='pending',
             source='machine',
