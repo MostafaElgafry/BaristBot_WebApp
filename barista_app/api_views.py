@@ -638,26 +638,31 @@ class MachineOrderAPIView(APIView):
         order_name = validated['order_name']
         external_order_id = validated.get('external_order_id') or validated['order_id']
 
-        # Resolve everything from Recipe + ToneMachineButton config.
+        # Look up Recipe by name for dose_grams and grind_grade
         recipe = Recipe.objects.get(name__iexact=order_name, is_active=True)
-
-        # Recipe number from ToneMachineButton mapping
-        recipe_number = recipe.get_recipe_number()
-        if recipe_number is None:
-            return Response({
-                'error': f"Recipe '{recipe.name}' is not assigned to any active tone machine button."
-            }, status=status.HTTP_400_BAD_REQUEST)
-
-        # All parameters from Recipe config — nothing hardcoded
         dose_grams = recipe.dose_grams
         grind_grade = recipe.grind_grade
-        doser_number = recipe.doser_number
-        grinder_number = recipe.grinder_number
+
+        # Physical robot parameters: use payload values if provided,
+        # fall back to Recipe config only when not sent by the client.
+        doser_number = validated.get('doser') or recipe.doser_number
+        grinder_number = validated.get('grind') or recipe.grinder_number
+
+        # Recipe/button number: use payload value if provided,
+        # otherwise resolve from ToneMachineButton mapping.
+        recipe_number = validated.get('recipe')
+        if recipe_number is None:
+            recipe_number = recipe.get_recipe_number()
+            if recipe_number is None:
+                return Response({
+                    'error': f"Recipe '{recipe.name}' is not assigned to any active tone machine button."
+                }, status=status.HTTP_400_BAD_REQUEST)
 
         logger.info(
-            f"[ORDER] Resolved '{recipe.name}' (id={recipe.id}): "
+            f"[ORDER] '{recipe.name}' → "
             f"D{doser_number} G{grinder_number} R{recipe_number} "
-            f"dose={dose_grams}g grade={grind_grade}"
+            f"dose={dose_grams}g grade={grind_grade} "
+            f"(payload: doser={validated.get('doser')}, grind={validated.get('grind')}, recipe={validated.get('recipe')})"
         )
 
         order = ManualOrder.objects.create(

@@ -141,6 +141,8 @@ def _dispatch_order(order):
                 order.doser_number,
                 order.grinder_number,
                 order.recipe_number,
+                order.dose_grams,
+                order.grind_grade,
                 order_id=order.id,
             )
 

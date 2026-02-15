@@ -568,21 +568,6 @@ def get_robot_client() -> RobotControlBoardSerialClient:
         return _robot_client
 
 
-def _resolve_recipe_params(recipe_no: int) -> tuple[int, int]:
-    """
-    Resolve dose_grams and grind_grade from Recipe via ToneMachineButton mapping.
-    Returns (dose_grams, grind_grade).
-    Raises ValueError if no mapping found.
-    """
-    from .models import ToneMachineButton
-    try:
-        button = ToneMachineButton.objects.get(button_number=recipe_no, is_active=True)
-    except ToneMachineButton.DoesNotExist:
-        raise ValueError(f"No active ToneMachineButton found for button_number={recipe_no}")
-    if button.recipe is None:
-        raise ValueError(f"ToneMachineButton {recipe_no} has no recipe assigned")
-    return button.recipe.dose_grams, button.recipe.grind_grade
-
 
 def _update_order_progress(order_id: Optional[int], message: str):
     """Update ManualOrder.response_message for progress tracking.
@@ -606,22 +591,16 @@ def _update_order_progress(order_id: Optional[int], message: str):
             pass  # best-effort progress update
 
 
-def send_manual_order(doser_no: int, grinder_no: int, recipe_no: int, order_id: int = None) -> tuple[bool, str]:
+def send_manual_order(doser_no: int, grinder_no: int, recipe_no: int, dose_g: int, grind_grade: int, order_id: int = None) -> tuple[bool, str]:
     """
     Send a manual order to the robot.
-    Resolves dose_grams and grind_grade from Recipe via ToneMachineButton.
+    All parameters are passed in directly — no internal re-resolution.
     Returns (success: bool, message: str)
     """
-    logger.debug(f"[DEBUG] send_manual_order() called: doser={doser_no}, grinder={grinder_no}, recipe={recipe_no}, order_id={order_id}")
-
-    # Resolve dose and grind_grade from Recipe config
-    try:
-        dose_g, grind_grade = _resolve_recipe_params(recipe_no)
-    except ValueError as e:
-        logger.error(f"[ERROR] Recipe resolution failed: {e}")
-        return False, str(e)
-
-    logger.debug(f"[DEBUG] Resolved from recipe: dose={dose_g}g, grade={grind_grade}")
+    logger.debug(
+        f"[DEBUG] send_manual_order() called: doser={doser_no}, grinder={grinder_no}, "
+        f"recipe={recipe_no}, dose={dose_g}g, grade={grind_grade}, order_id={order_id}"
+    )
 
     # Demo mode - simulate successful order
     if is_demo_mode():
