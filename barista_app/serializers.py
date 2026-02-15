@@ -232,7 +232,14 @@ class AnalyticsDailySerializer(serializers.ModelSerializer):
 
 
 class MachineOrderInputSerializer(serializers.Serializer):
-    """Serializer for incoming machine API orders."""
+    """Serializer for incoming machine API orders.
+
+    Only `order_name` and `order_id` are required. All robot parameters
+    (doser, grinder, recipe number, dose, grind grade) are resolved
+    automatically from the Recipe + ToneMachineButton configuration.
+    Extra fields in the payload (e.g. doser, grind, recipe, itemid)
+    are accepted but ignored.
+    """
     order_name = serializers.CharField(
         max_length=100,
         help_text="Recipe name (must match an active Recipe)"
@@ -245,9 +252,6 @@ class MachineOrderInputSerializer(serializers.Serializer):
         max_length=100, required=False, default='',
         help_text="External order ID (falls back to order_id if not provided)"
     )
-    doser_number = serializers.IntegerField(required=False, min_value=1, max_value=4)
-    grinder_number = serializers.IntegerField(required=False, min_value=1, max_value=4)
-    recipe_number = serializers.IntegerField(required=False, min_value=1, max_value=4)
 
     def validate_order_name(self, value):
         from .models import Recipe
