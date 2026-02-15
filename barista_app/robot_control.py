@@ -781,12 +781,29 @@ def send_tcp_command_to_cobot(doser_no: int, grinder_no: int, recipe_no: int, se
     # Create listening socket and wait for client to connect
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
+        # Set socket options to allow reuse and close linger
         srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        # On Windows, also set SO_EXCLUSIVEADDRUSE to 0 to explicitly allow reuse
         try:
-            srv.bind((host, port))
-        except OSError as e:
-            logger.error(f"[ERROR] Failed to bind to {host}:{port}: {e}")
-            return False, f"Bind failed: {e}"
+            srv.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, 0)
+        except (AttributeError, OSError):
+            pass  # SO_LINGER may not be available on all platforms
+        
+        bind_attempts = 0
+        max_bind_attempts = 3
+        while bind_attempts < max_bind_attempts:
+            try:
+                srv.bind((host, port))
+                logger.info(f"[INFO] Socket bound successfully to {host}:{port}")
+                break
+            except OSError as e:
+                bind_attempts += 1
+                if bind_attempts >= max_bind_attempts:
+                    logger.error(f"[ERROR] Failed to bind to {host}:{port} after {max_bind_attempts} attempts: {e}")
+                    return False, f"Bind failed: {e}"
+                logger.warning(f"[WARNING] Bind attempt {bind_attempts} failed, retrying in 1 second: {e}")
+                time.sleep(1)
+        
         srv.listen(1)
         srv.settimeout(connect_timeout)
         logger.info(f"[INFO] TCP server listening on {host}:{port}, waiting for cobot client connection...")
@@ -898,6 +915,11 @@ def send_tcp_command_to_cobot(doser_no: int, grinder_no: int, recipe_no: int, se
         logger.debug(f"[DEBUG] TCP server traceback:\n{traceback.format_exc()}")
         return False, str(e)
     finally:
+        try:
+            # Shutdown the socket to force immediate closure
+            srv.shutdown(socket.SHUT_RDWR)
+        except (OSError, socket.error):
+            pass  # Socket may already be closed
         try:
             srv.close()
         except Exception:
