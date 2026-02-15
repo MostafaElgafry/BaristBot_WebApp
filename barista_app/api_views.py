@@ -628,6 +628,9 @@ class MachineOrderAPIView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        # Log raw payload for debugging (shows what client actually sent)
+        logger.info(f"[ORDER] Raw payload: {dict(data)}")
+
         serializer = MachineOrderInputSerializer(data=data)
         serializer.is_valid(raise_exception=True)
 
@@ -645,14 +648,14 @@ class MachineOrderAPIView(APIView):
                 'error': f"Recipe '{recipe.name}' is not assigned to any active tone machine button."
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        # All parameters from Recipe config
+        # All parameters from Recipe config — nothing hardcoded
         dose_grams = recipe.dose_grams
         grind_grade = recipe.grind_grade
         doser_number = recipe.doser_number
         grinder_number = recipe.grinder_number
 
         logger.info(
-            f"[ORDER] Resolved '{recipe.name}': "
+            f"[ORDER] Resolved '{recipe.name}' (id={recipe.id}): "
             f"D{doser_number} G{grinder_number} R{recipe_number} "
             f"dose={dose_grams}g grade={grind_grade}"
         )
@@ -677,6 +680,11 @@ class MachineOrderAPIView(APIView):
             'order_id': order.id,
             'external_order_id': order.external_order_id,
             'order_name': order.order_name,
+            'dose_grams': order.dose_grams,
+            'grind_grade': order.grind_grade,
+            'doser_number': order.doser_number,
+            'grinder_number': order.grinder_number,
+            'recipe_number': order.recipe_number,
             'status': order.status,
             'message': message,
         }, status=status.HTTP_201_CREATED)
