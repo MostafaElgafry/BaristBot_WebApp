@@ -93,14 +93,19 @@ def enqueue_order(order):
     """
     Attempt to process an order immediately, or queue it.
 
-    If no order is currently being processed, sends this order to the robot.
-    Otherwise, marks it as queued.
+    The order is dispatched immediately ONLY when:
+      - No order is currently being processed, AND
+      - No orders are already waiting in the queue.
+
+    Otherwise it is queued. Queued orders are dispatched exclusively
+    via the /complete/ endpoint.
 
     Returns (status, message) tuple.
     """
     active = _get_active_order()
+    has_queued = ManualOrder.objects.filter(status='queued').exists()
 
-    if active is None:
+    if active is None and not has_queued:
         return _dispatch_order(order)
     else:
         order.status = 'queued'
@@ -108,11 +113,12 @@ def enqueue_order(order):
         queue_pos = ManualOrder.objects.filter(
             status='queued', created_at__lt=order.created_at
         ).count() + 1
+        blocker = active.id if active else 'finished (waiting for /complete/)'
         logger.info(
             f"Order #{order.id} queued (position {queue_pos}). "
-            f"Active order: #{active.id}"
+            f"Blocked by: #{blocker}"
         )
-        return 'queued', f"Order queued at position {queue_pos}. Active order: #{active.id}"
+        return 'queued', f"Order queued at position {queue_pos}"
 
 
 def _dispatch_order(order):
@@ -229,6 +235,16 @@ def complete_order(order_id):
         'final_status': order.status,
         'next_order': None,
     }
+
+    # Only dispatch next if no other order is already processing.
+    # This prevents two orders running simultaneously.
+    already_processing = _get_active_order()
+    if already_processing:
+        logger.info(
+            f"Order #{already_processing.id} is already processing, "
+            f"not dispatching next after completing #{order.id}"
+        )
+        return result
 
     # Dispatch next queued order
     next_order = _get_next_queued_order()
