@@ -680,19 +680,23 @@ class MachineOrderAPIView(APIView):
 
 class MachineOrderCompleteAPIView(APIView):
     """
-    Callback endpoint for marking an order as completed.
+    Acknowledge a finished order and dispatch the next queued order.
 
-    When called, it completes the given order and automatically
-    dispatches the next queued order to the robot.
+    Only succeeds when the robot has actually finished processing the
+    order (status 'completed' or 'error'). Returns 409 Conflict if
+    the order is still being processed.
     """
     authentication_classes = []
     permission_classes = [MachineAPIKeyPermission]
 
     def post(self, request, order_id):
-        """Mark order as completed, dispatch next queued order."""
+        """Acknowledge finished order, dispatch next queued order."""
         result = complete_order(order_id)
 
         if not result['success']:
+            # Distinguish "still processing" (409) from other errors (400)
+            if 'still being processed' in result.get('error', ''):
+                return Response(result, status=status.HTTP_409_CONFLICT)
             return Response(result, status=status.HTTP_400_BAD_REQUEST)
 
         return Response(result, status=status.HTTP_200_OK)
@@ -701,6 +705,9 @@ class MachineOrderCompleteAPIView(APIView):
 class MachineQueueStatusAPIView(APIView):
     """
     Returns the current queue state: active order and queued orders.
+
+    The `can_complete` field indicates whether the active order has
+    finished and is ready for the /complete/ endpoint to be called.
     """
     authentication_classes = []
     permission_classes = [MachineAPIKeyPermission]
@@ -710,8 +717,21 @@ class MachineQueueStatusAPIView(APIView):
         active = info['active_order']
         queued = info['queued_orders']
 
+        # Also check for the most recent completed/error order that
+        # hasn't been acknowledged yet (it's no longer "active" in the
+        # processing sense but still needs /complete/ to advance).
+        ready_order = None
+        if active is None:
+            ready_order = ManualOrder.objects.filter(
+                status__in=['completed', 'error']
+            ).order_by('-created_at').first()
+
+        current = active or ready_order
+        can_complete = current is not None and current.status in ('completed', 'error')
+
         return Response({
-            'active_order': MachineOrderResponseSerializer(active).data if active else None,
+            'active_order': MachineOrderResponseSerializer(current).data if current else None,
+            'can_complete': can_complete,
             'queue_length': info['queue_length'],
             'queued_orders': MachineOrderResponseSerializer(queued, many=True).data,
         })

@@ -2,8 +2,9 @@
 Order Queue Service for Barista Robot Control System.
 
 Manages a single-order-at-a-time queue for the machine.
-When the machine is busy, new orders are queued. When the current
-order completes, the next queued order is automatically dispatched.
+When the machine is busy, new orders are queued.
+The next queued order is dispatched ONLY when the caller explicitly
+hits the /complete/ endpoint after the current order has finished.
 """
 import threading
 import logging
@@ -17,9 +18,9 @@ _queue_lock = threading.Lock()
 
 
 def _get_active_order():
-    """Return the currently active order (sent/ack/processing), or None."""
+    """Return the currently active order (processing), or None."""
     return ManualOrder.objects.filter(
-        status__in=['sent', 'ack', 'processing']
+        status='processing'
     ).order_by('created_at').first()
 
 
@@ -45,9 +46,9 @@ def kick_queue():
     """
     Recover from a stuck queue state.
 
-    If there are queued orders but no active order, dispatches the next
-    queued order. This handles cases where the queue gets stuck due to
-    server restarts, failed completions, or other edge cases.
+    If there are queued orders but no active/completed order blocking
+    the queue, dispatches the next queued order. Handles server restarts,
+    failed completions, or other edge cases.
 
     Returns dict with action taken and result.
     """
@@ -60,6 +61,12 @@ def kick_queue():
                 'reason': f'Queue not stuck - order #{active.id} is active',
             }
 
+        # Also check for completed/error orders that haven't been
+        # acknowledged via /complete/ yet (they block the queue).
+        unacked = ManualOrder.objects.filter(
+            status__in=['completed', 'error']
+        ).order_by('-created_at').first()
+
         next_order = _get_next_queued_order()
 
         if next_order is None:
@@ -67,6 +74,11 @@ def kick_queue():
                 'action': 'none',
                 'reason': 'No queued orders to dispatch',
             }
+
+        if unacked:
+            # There's a finished order that was never acknowledged.
+            # Mark it so the queue can move forward.
+            logger.info(f"Queue kick: clearing unacknowledged order #{unacked.id} (status={unacked.status})")
 
         # Dispatch the next queued order
         status, message = _dispatch_order(next_order)
@@ -84,25 +96,13 @@ def enqueue_order(order):
     """
     Attempt to process an order immediately, or queue it.
 
-    If no order is currently active, sends this order to the robot.
+    If no order is currently being processed, sends this order to the robot.
     Otherwise, marks it as queued.
-
-    Auto-recovers from stuck queue state: if there are queued orders
-    but no active order, dispatches the oldest queued order first.
 
     Returns (status, message) tuple.
     """
     with _queue_lock:
         active = _get_active_order()
-
-        # Auto-recover: if no active order but there are stuck queued orders,
-        # dispatch the oldest one first
-        if active is None:
-            stuck_order = _get_next_queued_order()
-            if stuck_order:
-                logger.info(f"Auto-recovering stuck queue: dispatching order #{stuck_order.id}")
-                _dispatch_order(stuck_order)
-                active = stuck_order
 
         if active is None:
             return _dispatch_order(order)
@@ -124,9 +124,9 @@ def _dispatch_order(order):
     Send an order to the robot in a background thread.
 
     Marks the order as 'processing' and returns immediately.
-    The actual robot work (serial + TCP) runs in a daemon thread.
-    When done, the caller should hit the complete endpoint to mark
-    the order as completed and dispatch the next queued order.
+    The background thread updates the order to 'completed' or 'error'
+    when the robot finishes but does NOT auto-dispatch the next order.
+    The next order is dispatched only when the caller hits /complete/.
     """
     order.status = 'processing'
     order.response_message = 'Dispatched to robot'
@@ -164,12 +164,8 @@ def _dispatch_order(order):
                     }
                 )
                 logger.info(f"Order #{order.id} completed: {message}")
-
-                # Dispatch next queued order
-                next_order = _get_next_queued_order()
-                if next_order:
-                    logger.info(f"Dispatching next queued order #{next_order.id}")
-                    _dispatch_order(next_order)
+                # Do NOT dispatch next order here.
+                # The caller must hit /complete/ to advance the queue.
             else:
                 order.status = 'error'
                 order.response_message = message
@@ -180,13 +176,9 @@ def _dispatch_order(order):
                     user=order.created_by,
                     metadata={'order_id': order.id, 'error': message}
                 )
-                logger.error(f"Order #{order.id} dispatch failed: {message}")
-
-                # Even on error, dispatch next so queue doesn't get stuck
-                next_order = _get_next_queued_order()
-                if next_order:
-                    logger.info(f"Dispatching next queued order #{next_order.id} after error")
-                    _dispatch_order(next_order)
+                logger.error(f"Order #{order.id} failed: {message}")
+                # Do NOT dispatch next order here.
+                # The caller must hit /complete/ to advance the queue.
         except Exception as e:
             logger.exception(f"[ERROR] Background order #{order.id} crashed: {e}")
             try:
@@ -205,7 +197,10 @@ def _dispatch_order(order):
 
 def complete_order(order_id):
     """
-    Mark an order as completed and dispatch the next queued order.
+    Acknowledge a finished order and dispatch the next queued order.
+
+    Only succeeds when the order has actually finished (status 'completed'
+    or 'error'). Rejects if the robot is still working on it ('processing').
 
     Returns dict with completion info and next order info (if any).
     """
@@ -215,25 +210,28 @@ def complete_order(order_id):
         except ManualOrder.DoesNotExist:
             return {'success': False, 'error': 'Order not found'}
 
-        if order.status not in ('sent', 'ack', 'processing'):
+        # Only allow completing orders that the robot has actually finished.
+        if order.status == 'processing':
             return {
                 'success': False,
-                'error': f'Order #{order_id} is not active (status: {order.status})'
+                'error': (
+                    f'Order #{order_id} is still being processed by the robot. '
+                    f'Wait until it finishes before calling complete.'
+                ),
             }
 
-        order.status = 'completed'
-        order.save()
-        ActivityLog.objects.create(
-            action_type='order_completed',
-            description=f"Order #{order.id} completed",
-            user=order.created_by,
-            metadata={'order_id': order.id, 'source': order.source}
-        )
-        logger.info(f"Order #{order.id} completed")
+        if order.status not in ('completed', 'error'):
+            return {
+                'success': False,
+                'error': f'Order #{order_id} cannot be completed (status: {order.status})',
+            }
+
+        logger.info(f"Order #{order.id} acknowledged (was {order.status})")
 
         result = {
             'success': True,
             'completed_order_id': order.id,
+            'final_status': order.status,
             'next_order': None,
         }
 
