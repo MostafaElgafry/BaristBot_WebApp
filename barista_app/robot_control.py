@@ -585,7 +585,11 @@ def _resolve_recipe_params(recipe_no: int) -> tuple[int, int]:
 
 
 def _update_order_progress(order_id: Optional[int], message: str):
-    """Update ManualOrder.response_message for progress tracking."""
+    """Update ManualOrder.response_message for progress tracking.
+
+    Uses a short retry with back-off to handle SQLite database-is-locked
+    errors that can occur when the main HTTP thread is also accessing the DB.
+    """
     if order_id is None:
         return
     try:
@@ -593,6 +597,13 @@ def _update_order_progress(order_id: Optional[int], message: str):
         ManualOrder.objects.filter(id=order_id).update(response_message=message)
     except Exception as e:
         logger.warning(f"[WARNING] Failed to update order progress: {e}")
+        # Retry once after a short delay (SQLite lock contention)
+        try:
+            time.sleep(0.1)
+            from .models import ManualOrder
+            ManualOrder.objects.filter(id=order_id).update(response_message=message)
+        except Exception:
+            pass  # best-effort progress update
 
 
 def send_manual_order(doser_no: int, grinder_no: int, recipe_no: int, order_id: int = None) -> tuple[bool, str]:
@@ -878,7 +889,6 @@ def send_tcp_command_to_cobot(doser_no: int, grinder_no: int, recipe_no: int, se
                 if not ok:
                     _update_order_progress(order_id, f"Step {i}/{total}: {label} - FAILED: {resp}")
                     return False, resp
-                _update_order_progress(order_id, f"Step {i}/{total}: {label} done")
 
             # All steps succeeded
             return True, resp

@@ -25,8 +25,12 @@ from .serializers import (
     SystemSettingsSerializer, ActivityLogSerializer, AnalyticsDailySerializer,
     DashboardSerializer
 )
+from django.http import UnreadablePostError
 from .robot_control import check_robot_connection, wait_for_order_completion, check_pre_use
 from .order_queue import enqueue_order, complete_order, get_queue_info
+
+import logging
+logger = logging.getLogger(__name__)
 
 
 class IsManagerPermission(permissions.BasePermission):
@@ -614,18 +618,28 @@ class MachineOrderAPIView(APIView):
 
     def post(self, request):
         """Place a new order. Returns immediately with status (processing or queued)."""
-        serializer = MachineOrderInputSerializer(data=request.data)
+        try:
+            data = request.data
+        except UnreadablePostError as e:
+            logger.warning(f"[WARNING] Client disconnected before body could be read: {e}")
+            return Response(
+                {'error': 'Client connection was reset before the request body could be read. '
+                           'Please retry with a longer timeout.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        serializer = MachineOrderInputSerializer(data=data)
         serializer.is_valid(raise_exception=True)
 
-        data = serializer.validated_data
-        order_name = data['order_name']
-        external_order_id = data.get('external_order_id') or data['order_id']
+        validated = serializer.validated_data
+        order_name = validated['order_name']
+        external_order_id = validated.get('external_order_id') or validated['order_id']
 
         # Always resolve recipe by name for canonical order_name.
         recipe = Recipe.objects.get(name__iexact=order_name, is_active=True)
 
         # Resolve recipe_number from ToneMachineButton mapping
-        recipe_number = data.get('recipe_number') or recipe.get_recipe_number()
+        recipe_number = validated.get('recipe_number') or recipe.get_recipe_number()
         if recipe_number is None:
             return Response({
                 'error': f"Recipe '{recipe.name}' is not assigned to any active tone machine button."
@@ -636,8 +650,8 @@ class MachineOrderAPIView(APIView):
         grind_grade = recipe.grind_grade
 
         # Use overrides or defaults for doser/grinder
-        doser_number = data.get('doser_number', recipe.doser_number)
-        grinder_number = data.get('grinder_number', 1)
+        doser_number = validated.get('doser_number', recipe.doser_number)
+        grinder_number = validated.get('grinder_number', 1)
 
         order = ManualOrder.objects.create(
             external_order_id=external_order_id,
