@@ -713,17 +713,124 @@ def wait_for_order_completion(timeout: float = 60.0) -> tuple[bool, str]:
         return False, f"Unexpected error: {e}"
 
 
+# ─── Persistent TCP connection to cobot ─────────────────────────────
+_cobot_srv: Optional[socket.socket] = None   # Server (listening) socket
+_cobot_conn: Optional[socket.socket] = None  # Client connection
+_cobot_tcp_lock = threading.Lock()
+
+
+def _cobot_conn_is_alive() -> bool:
+    """Check if the existing cobot connection is still alive."""
+    global _cobot_conn
+    if _cobot_conn is None:
+        return False
+    try:
+        # Non-blocking peek to check if the socket is alive
+        _cobot_conn.setblocking(False)
+        try:
+            data = _cobot_conn.recv(1, socket.MSG_PEEK)
+            if not data:
+                # Peer closed the connection
+                return False
+        except BlockingIOError:
+            pass  # No data waiting — connection is alive
+        except (ConnectionResetError, OSError):
+            return False
+        finally:
+            _cobot_conn.setblocking(True)
+        return True
+    except Exception:
+        return False
+
+
+def _ensure_cobot_connection(host: str, port: int, connect_timeout: float) -> socket.socket:
+    """Get the persistent cobot connection, creating server/accepting if needed.
+
+    - First call: creates server socket, binds, listens, accepts connection.
+    - Subsequent calls: reuses the existing connection if alive.
+    - If connection is dead: accepts a new one on the existing server.
+    - If server is dead: recreates everything.
+    """
+    global _cobot_srv, _cobot_conn
+
+    # Fast path: existing connection is alive
+    if _cobot_conn_is_alive():
+        logger.info("[INFO] Reusing existing cobot TCP connection")
+        return _cobot_conn
+
+    # Connection is dead — clean it up
+    if _cobot_conn is not None:
+        logger.info("[INFO] Previous cobot connection is dead, cleaning up")
+        try:
+            _cobot_conn.close()
+        except Exception:
+            pass
+        _cobot_conn = None
+
+    # Ensure server socket exists
+    if _cobot_srv is None:
+        _cobot_srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        _cobot_srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+
+        bind_attempts = 0
+        max_bind_attempts = 5
+        while bind_attempts < max_bind_attempts:
+            try:
+                _cobot_srv.bind((host, port))
+                logger.info(f"[INFO] TCP server bound to {host}:{port}")
+                break
+            except OSError as e:
+                bind_attempts += 1
+                if bind_attempts >= max_bind_attempts:
+                    logger.error(f"[ERROR] Failed to bind after {max_bind_attempts} attempts: {e}")
+                    _cobot_srv = None
+                    raise
+                logger.warning(f"[WARNING] Bind attempt {bind_attempts} failed: {e}")
+                time.sleep(1)
+
+        _cobot_srv.listen(1)
+        logger.info(f"[INFO] TCP server listening on {host}:{port}")
+
+    # Accept a new connection from the cobot
+    _cobot_srv.settimeout(connect_timeout)
+    logger.info(f"[INFO] Waiting for cobot to connect on {host}:{port}...")
+    _cobot_conn, addr = _cobot_srv.accept()
+    _cobot_conn.settimeout(1.0)
+    logger.info(f"[INFO] Cobot connected from {addr}")
+    return _cobot_conn
+
+
+def close_cobot_connection():
+    """Close the persistent cobot TCP connection and server (for shutdown)."""
+    global _cobot_srv, _cobot_conn
+    with _cobot_tcp_lock:
+        if _cobot_conn:
+            try:
+                _cobot_conn.close()
+            except Exception:
+                pass
+            _cobot_conn = None
+        if _cobot_srv:
+            try:
+                _cobot_srv.close()
+            except Exception:
+                pass
+            _cobot_srv = None
+    logger.info("[INFO] Cobot TCP connection and server closed")
+
+
 def send_tcp_command_to_cobot(doser_no: int, grinder_no: int, recipe_no: int, server_no: int, order_id: int = None, host: str = "192.168.57.10", port: int = 1233, connect_timeout: float = 300.0, response_timeout: float = 300.0) -> tuple[bool, str]:
     """
-    Act as a TCP server for the cobot client.
+    Send movement commands to the cobot over a persistent TCP connection.
 
-    Workflow expected by the cobot (client) pseudocode provided by the user:
-    - The cobot will open a connection to (host, port), then send "OK" as a handshake.
-    - The server (this function) should respond with "start" and then send the command parameters.
-    - The cobot performs tasks and then sends back "Done" (or similar).
+    The cobot connects once as a TCP client. The connection is kept alive
+    across orders so the cobot doesn't need to reconnect each time.
 
-    Note: server_no MUST be pre-determined by the caller by calling check_pre_use()
-    to avoid redundant CHECK commands being sent to the robot.
+    For each order:
+      1. Send "start" → cobot replies "ACK"
+      2. Send GO_TO_D, GO_TO_G, GO_TO_S, etc. → cobot replies "Done" each time
+
+    If the connection is dead, a new one is accepted automatically.
 
     Args:
         doser_no: Doser number (1-4)
@@ -736,11 +843,12 @@ def send_tcp_command_to_cobot(doser_no: int, grinder_no: int, recipe_no: int, se
         connect_timeout: Timeout for cobot client connection
         response_timeout: Timeout for command responses
 
-    Returns (True, message) on success where message is the response from the cobot (e.g. "Done").
+    Returns (True, message) on success.
     Returns (False, error_message) on failure.
     """
+    global _cobot_conn
 
-    logger.debug(f"[DEBUG] send_tcp_command_to_cobot() called: doser={doser_no}, grinder={grinder_no}, recipe={recipe_no}, server_no={server_no}, host={host}, port={port}")
+    logger.debug(f"[DEBUG] send_tcp_command_to_cobot() called: doser={doser_no}, grinder={grinder_no}, recipe={recipe_no}, server_no={server_no}")
 
     # Simple validation
     try:
@@ -751,60 +859,29 @@ def send_tcp_command_to_cobot(doser_no: int, grinder_no: int, recipe_no: int, se
     except Exception:
         return False, "Invalid doser_no, grinder_no, recipe_no or server_no (must be integers)"
 
-    # Validate server_no
     if not (1 <= server_no <= 4):
         return False, "server_no must be 1..4"
     if not (1 <= grinder_no <= 4):
         return False, "grinder_no must be 1..4"
 
-    # Create listening socket and wait for client to connect
-    srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    try:
-        # Set socket options to allow reuse and close linger
-        srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        # On Windows, also set SO_EXCLUSIVEADDRUSE to 0 to explicitly allow reuse
+    with _cobot_tcp_lock:
         try:
-            srv.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, 0)
-        except (AttributeError, OSError):
-            pass  # SO_LINGER may not be available on all platforms
-        
-        bind_attempts = 0
-        max_bind_attempts = 3
-        while bind_attempts < max_bind_attempts:
-            try:
-                srv.bind((host, port))
-                logger.info(f"[INFO] Socket bound successfully to {host}:{port}")
-                break
-            except OSError as e:
-                bind_attempts += 1
-                if bind_attempts >= max_bind_attempts:
-                    logger.error(f"[ERROR] Failed to bind to {host}:{port} after {max_bind_attempts} attempts: {e}")
-                    return False, f"Bind failed: {e}"
-                logger.warning(f"[WARNING] Bind attempt {bind_attempts} failed, retrying in 1 second: {e}")
-                time.sleep(1)
-        
-        srv.listen(1)
-        srv.settimeout(connect_timeout)
-        logger.info(f"[INFO] TCP server listening on {host}:{port}, waiting for cobot client connection...")
-
-        try:
-            conn, addr = srv.accept()
+            conn = _ensure_cobot_connection(host, port, connect_timeout)
         except socket.timeout:
-            return False, f"Timeout waiting for cobot client to connect on {host}:{port}"
+            return False, f"Timeout waiting for cobot to connect on {host}:{port}"
+        except Exception as e:
+            return False, f"Failed to establish cobot connection: {e}"
 
-        with closing(conn):
-            logger.info(f"[INFO] Cobot client connected from {addr}")
-            conn.settimeout(1.0)
-
-            # Immediately send "start" to initiate handshake, then wait for "ACK"
+        try:
+            # Handshake: send "start", wait for "ACK"
             try:
                 conn.sendall(b"start")
                 logger.info("[INFO] Sent: start")
             except Exception as e:
                 logger.error(f"[ERROR] Failed to send 'start': {e}")
+                _cobot_conn = None  # Mark connection as dead
                 return False, f"Send error: {e}"
 
-            # Wait for ACK from client (only 'ACK' expected)
             deadline = time.time() + response_timeout
             ack_received = False
             buffer = b""
@@ -816,45 +893,42 @@ def send_tcp_command_to_cobot(doser_no: int, grinder_no: int, recipe_no: int, se
                         continue
                     buffer += chunk
                     text = buffer.decode('utf-8', errors='replace').strip()
-                    logger.debug(f"[DEBUG] Waiting for ACK, received chunk: {text}")
+                    logger.debug(f"[DEBUG] Waiting for ACK, received: {text}")
                     if text.lower() == "ack":
                         ack_received = True
-                        logger.info(f"[INFO] ACK received from client: {text}")
+                        logger.info(f"[INFO] ACK received from cobot")
                         break
-                    # otherwise keep collecting until timeout
                 except socket.timeout:
                     continue
                 except Exception as e:
-                    logger.error(f"[ERROR] Error while waiting for ACK: {e}")
+                    logger.error(f"[ERROR] Error waiting for ACK: {e}")
+                    _cobot_conn = None
                     return False, f"Receive error: {e}"
 
             if not ack_received:
                 logger.warning("[WARNING] ACK not received after start")
-                return False, "ACK not received from client after start"
+                _cobot_conn = None
+                return False, "ACK not received from cobot after start"
 
-            # Sequence: GO_TO_D -> GO_TO_G{n} -> GO_TO_S -> RETURN_TO_D -> RETURN_TO_S -> GO_TO_R
+            # Helper to send a command and wait for "Done"
             def _send_and_wait(msg: str, step_name: str) -> tuple[bool, str]:
-                """Helper to send a message and wait for Done/OK response."""
                 try:
-                    payload = msg.encode('utf-8')
+                    conn.sendall(msg.encode('utf-8'))
                     logger.info(f"[INFO] Sent: {msg}")
-                    logger.debug(f"[DEBUG] Sending payload for {step_name}: {payload!r} hex:{payload.hex()}")
-                    print(f"Sending: {payload!r}")
-                    conn.sendall(payload)
                 except Exception as e:
                     logger.error(f"[ERROR] Failed to send {step_name}: {e}")
                     return False, f"Send error: {e}"
 
-                deadline = time.time() + response_timeout
-                buffer = b""
-                while time.time() < deadline:
+                dl = time.time() + response_timeout
+                buf = b""
+                while time.time() < dl:
                     try:
                         chunk = conn.recv(1024)
                         if not chunk:
                             time.sleep(0.05)
                             continue
-                        buffer += chunk
-                        text = buffer.decode('utf-8', errors='replace').strip()
+                        buf += chunk
+                        text = buf.decode('utf-8', errors='replace').strip()
                         logger.debug(f"[DEBUG] Waiting for {step_name} Done, received: {text}")
                         if text.lower().startswith("done"):
                             logger.info(f"[INFO] {step_name} completed: {text}")
@@ -862,13 +936,13 @@ def send_tcp_command_to_cobot(doser_no: int, grinder_no: int, recipe_no: int, se
                     except socket.timeout:
                         continue
                     except Exception as e:
-                        logger.error(f"[ERROR] Error while waiting for {step_name}: {e}")
+                        logger.error(f"[ERROR] Error waiting for {step_name}: {e}")
                         return False, f"Receive error: {e}"
 
-                logger.warning(f"[WARNING] Timeout waiting for {step_name} completion")
+                logger.warning(f"[WARNING] Timeout waiting for {step_name}")
                 return False, f"Timeout waiting for {step_name} completion"
 
-            # Sequence of (command, step_label) tuples
+            # Command sequence
             steps = [
                 (f"GO_TO_D{doser_no}", "Moving to doser"),
                 (f"GO_TO_G{grinder_no}", "Moving to grinder"),
@@ -884,25 +958,17 @@ def send_tcp_command_to_cobot(doser_no: int, grinder_no: int, recipe_no: int, se
                 ok, resp = _send_and_wait(cmd, cmd)
                 if not ok:
                     _update_order_progress(order_id, f"Step {i}/{total}: {label} - FAILED: {resp}")
+                    _cobot_conn = None  # Mark connection as dead on failure
                     return False, resp
 
-            # All steps succeeded
+            # All steps succeeded — connection stays alive for next order
             return True, resp
 
-    except Exception as e:
-        logger.error(f"[ERROR] TCP server error: {e}")
-        logger.debug(f"[DEBUG] TCP server traceback:\n{traceback.format_exc()}")
-        return False, str(e)
-    finally:
-        try:
-            # Shutdown the socket to force immediate closure
-            srv.shutdown(socket.SHUT_RDWR)
-        except (OSError, socket.error):
-            pass  # Socket may already be closed
-        try:
-            srv.close()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(f"[ERROR] TCP command error: {e}")
+            logger.debug(f"[DEBUG] Traceback:\n{traceback.format_exc()}")
+            _cobot_conn = None  # Mark connection as dead
+            return False, str(e)
 
 
 def check_robot_connection() -> tuple[bool, str]:
