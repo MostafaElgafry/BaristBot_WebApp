@@ -40,7 +40,7 @@ class DozerAdmin(admin.ModelAdmin):
 
 @admin.register(Recipe)
 class RecipeAdmin(admin.ModelAdmin):
-    list_display = ['name', 'is_active']
+    list_display = ['name', 'dose_grams', 'grind_grade', 'doser_number', 'grinder_number', 'is_active']
     list_filter = ['is_active']
 
 

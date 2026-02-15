@@ -649,7 +649,7 @@ class MachineOrderAPIView(APIView):
         dose_grams = recipe.dose_grams
         grind_grade = recipe.grind_grade
         doser_number = recipe.doser_number
-        grinder_number = 1  # default; configure per-recipe if needed
+        grinder_number = recipe.grinder_number
 
         logger.info(
             f"[ORDER] Resolved '{recipe.name}': "
@@ -763,6 +763,7 @@ class MachineDataSnapshotAPIView(APIView):
                 'dose_grams': recipe.dose_grams,
                 'grind_grade': recipe.grind_grade,
                 'doser_number': recipe.doser_number,
+                'grinder_number': recipe.grinder_number,
                 'recipe_number': recipe_number,
             })
         return Response({'recipes': recipes})

@@ -104,7 +104,7 @@ class RecipeSerializer(serializers.ModelSerializer):
         model = Recipe
         fields = [
             'id', 'name', 'description', 'dose_grams', 'grind_grade',
-            'doser_number', 'is_active', 'created_at'
+            'doser_number', 'grinder_number', 'is_active', 'created_at'
         ]
         read_only_fields = ['id', 'created_at']
 

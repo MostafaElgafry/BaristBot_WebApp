@@ -126,6 +126,11 @@ class Recipe(models.Model):
         default=1,
         help_text="Doser number to use (1-4)"
     )
+    grinder_number = models.IntegerField(
+        validators=[MinValueValidator(1), MaxValueValidator(4)],
+        default=1,
+        help_text="Grinder number to use (1-4)"
+    )
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
