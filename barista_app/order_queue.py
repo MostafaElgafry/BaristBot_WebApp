@@ -14,8 +14,6 @@ from .robot_control import send_manual_order
 
 logger = logging.getLogger(__name__)
 
-_queue_lock = threading.Lock()
-
 
 def _get_active_order():
     """Return the currently active order (processing), or None."""
@@ -52,44 +50,43 @@ def kick_queue():
 
     Returns dict with action taken and result.
     """
-    with _queue_lock:
-        active = _get_active_order()
+    active = _get_active_order()
 
-        if active is not None:
-            return {
-                'action': 'none',
-                'reason': f'Queue not stuck - order #{active.id} is active',
-            }
-
-        # Also check for completed/error orders that haven't been
-        # acknowledged via /complete/ yet (they block the queue).
-        unacked = ManualOrder.objects.filter(
-            status__in=['completed', 'error']
-        ).order_by('-created_at').first()
-
-        next_order = _get_next_queued_order()
-
-        if next_order is None:
-            return {
-                'action': 'none',
-                'reason': 'No queued orders to dispatch',
-            }
-
-        if unacked:
-            # There's a finished order that was never acknowledged.
-            # Mark it so the queue can move forward.
-            logger.info(f"Queue kick: clearing unacknowledged order #{unacked.id} (status={unacked.status})")
-
-        # Dispatch the next queued order
-        status, message = _dispatch_order(next_order)
-        logger.info(f"Queue kicked: dispatched order #{next_order.id} with status {status}")
-
+    if active is not None:
         return {
-            'action': 'dispatched',
-            'order_id': next_order.id,
-            'status': status,
-            'message': message,
+            'action': 'none',
+            'reason': f'Queue not stuck - order #{active.id} is active',
         }
+
+    # Also check for completed/error orders that haven't been
+    # acknowledged via /complete/ yet (they block the queue).
+    unacked = ManualOrder.objects.filter(
+        status__in=['completed', 'error']
+    ).order_by('-created_at').first()
+
+    next_order = _get_next_queued_order()
+
+    if next_order is None:
+        return {
+            'action': 'none',
+            'reason': 'No queued orders to dispatch',
+        }
+
+    if unacked:
+        # There's a finished order that was never acknowledged.
+        # Mark it so the queue can move forward.
+        logger.info(f"Queue kick: clearing unacknowledged order #{unacked.id} (status={unacked.status})")
+
+    # Dispatch the next queued order
+    status, message = _dispatch_order(next_order)
+    logger.info(f"Queue kicked: dispatched order #{next_order.id} with status {status}")
+
+    return {
+        'action': 'dispatched',
+        'order_id': next_order.id,
+        'status': status,
+        'message': message,
+    }
 
 
 def enqueue_order(order):
@@ -101,22 +98,21 @@ def enqueue_order(order):
 
     Returns (status, message) tuple.
     """
-    with _queue_lock:
-        active = _get_active_order()
+    active = _get_active_order()
 
-        if active is None:
-            return _dispatch_order(order)
-        else:
-            order.status = 'queued'
-            order.save()
-            queue_pos = ManualOrder.objects.filter(
-                status='queued', created_at__lt=order.created_at
-            ).count() + 1
-            logger.info(
-                f"Order #{order.id} queued (position {queue_pos}). "
-                f"Active order: #{active.id}"
-            )
-            return 'queued', f"Order queued at position {queue_pos}. Active order: #{active.id}"
+    if active is None:
+        return _dispatch_order(order)
+    else:
+        order.status = 'queued'
+        order.save()
+        queue_pos = ManualOrder.objects.filter(
+            status='queued', created_at__lt=order.created_at
+        ).count() + 1
+        logger.info(
+            f"Order #{order.id} queued (position {queue_pos}). "
+            f"Active order: #{active.id}"
+        )
+        return 'queued', f"Order queued at position {queue_pos}. Active order: #{active.id}"
 
 
 def _dispatch_order(order):
@@ -204,49 +200,48 @@ def complete_order(order_id):
 
     Returns dict with completion info and next order info (if any).
     """
-    with _queue_lock:
-        try:
-            order = ManualOrder.objects.get(id=order_id)
-        except ManualOrder.DoesNotExist:
-            return {'success': False, 'error': 'Order not found'}
+    try:
+        order = ManualOrder.objects.get(id=order_id)
+    except ManualOrder.DoesNotExist:
+        return {'success': False, 'error': 'Order not found'}
 
-        # Only allow completing orders that the robot has actually finished.
-        if order.status == 'processing':
-            return {
-                'success': False,
-                'error': (
-                    f'Order #{order_id} is still being processed by the robot. '
-                    f'Wait until it finishes before calling complete.'
-                ),
-            }
-
-        if order.status not in ('completed', 'error'):
-            return {
-                'success': False,
-                'error': f'Order #{order_id} cannot be completed (status: {order.status})',
-            }
-
-        logger.info(f"Order #{order.id} acknowledged (was {order.status})")
-
-        result = {
-            'success': True,
-            'completed_order_id': order.id,
-            'final_status': order.status,
-            'next_order': None,
+    # Only allow completing orders that the robot has actually finished.
+    if order.status == 'processing':
+        return {
+            'success': False,
+            'error': (
+                f'Order #{order_id} is still being processed by the robot. '
+                f'Wait until it finishes before calling complete.'
+            ),
         }
 
-        # Dispatch next queued order
-        next_order = _get_next_queued_order()
-        if next_order:
-            next_status, next_message = _dispatch_order(next_order)
-            result['next_order'] = {
-                'order_id': next_order.id,
-                'status': next_status,
-                'message': next_message,
-            }
-            logger.info(
-                f"Next order #{next_order.id} dispatched after "
-                f"completing #{order.id}: {next_status}"
-            )
+    if order.status not in ('completed', 'error'):
+        return {
+            'success': False,
+            'error': f'Order #{order_id} cannot be completed (status: {order.status})',
+        }
 
-        return result
+    logger.info(f"Order #{order.id} acknowledged (was {order.status})")
+
+    result = {
+        'success': True,
+        'completed_order_id': order.id,
+        'final_status': order.status,
+        'next_order': None,
+    }
+
+    # Dispatch next queued order
+    next_order = _get_next_queued_order()
+    if next_order:
+        next_status, next_message = _dispatch_order(next_order)
+        result['next_order'] = {
+            'order_id': next_order.id,
+            'status': next_status,
+            'message': next_message,
+        }
+        logger.info(
+            f"Next order #{next_order.id} dispatched after "
+            f"completing #{order.id}: {next_status}"
+        )
+
+    return result
