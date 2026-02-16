@@ -664,6 +664,20 @@ def send_manual_order(doser_no: int, grinder_no: int, recipe_no: int, dose_g: in
             return False, f"Robot not connected: {e}"
 
     try:
+        # ── Close stale cobot connection before JOB ───────
+        # The cobot opens a fresh TCP connection after each JOB command.
+        # Clear the old connection so _get_cobot_connection() goes
+        # straight to accept() instead of wasting time on a dead reuse.
+        global _cobot_conn
+        with _cobot_tcp_lock:
+            if _cobot_conn is not None:
+                logger.info("[INFO] Closing stale cobot connection before new JOB")
+                try:
+                    _cobot_conn.close()
+                except Exception:
+                    pass
+                _cobot_conn = None
+
         # ── Send JOB command (cup already verified) ───────
         logger.debug(f"[DEBUG] Sending job to robot...")
         result = client.send_job(dose_g, grind_grade, doser_no, recipe_no)
