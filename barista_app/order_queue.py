@@ -7,12 +7,12 @@ The next queued order is dispatched ONLY when the caller explicitly
 hits the /complete/ endpoint after the current order has finished.
 
 Order lifecycle:
-  pending → processing → completed/error → ack (via /complete/)
-  pending → queued → processing → completed/error → ack (via /complete/)
+  pending → waiting_for_cup → processing → completed/error → ack (via /complete/)
+  pending → queued → waiting_for_cup → processing → completed/error → ack (via /complete/)
 
-The queue is BLOCKED when any order is in 'processing', 'completed',
-or 'error' status. Only after /complete/ moves it to 'ack' is the
-queue free to dispatch the next order.
+The queue is BLOCKED when any order is in 'waiting_for_cup', 'processing',
+'completed', or 'error' status. Only after /complete/ moves it to 'ack'
+is the queue free to dispatch the next order.
 """
 import threading
 import logging
@@ -27,6 +27,13 @@ def _get_active_order():
     """Return the currently active order (processing), or None."""
     return ManualOrder.objects.filter(
         status='processing'
+    ).order_by('created_at').first()
+
+
+def _get_waiting_for_cup_order():
+    """Return the order currently waiting for a delivery cup, or None."""
+    return ManualOrder.objects.filter(
+        status='waiting_for_cup'
     ).order_by('created_at').first()
 
 
@@ -49,8 +56,10 @@ def _get_next_queued_order():
 
 
 def _is_queue_blocked():
-    """Check if the queue is blocked by an active or unacknowledged order."""
+    """Check if the queue is blocked by an active, waiting-for-cup, or unacknowledged order."""
     if _get_active_order() is not None:
+        return True
+    if _get_waiting_for_cup_order() is not None:
         return True
     if _get_unacked_order() is not None:
         return True
@@ -60,11 +69,13 @@ def _is_queue_blocked():
 def get_queue_info():
     """Return current queue state."""
     active = _get_active_order()
+    waiting_cup = _get_waiting_for_cup_order()
     unacked = _get_unacked_order()
     queued = ManualOrder.objects.filter(status='queued').order_by('created_at')
-    current = active or unacked
+    current = active or waiting_cup or unacked
     return {
         'active_order': active,
+        'waiting_for_cup_order': waiting_cup,
         'unacked_order': unacked,
         'current_order': current,
         'queued_orders': list(queued),
@@ -82,11 +93,18 @@ def kick_queue():
     Returns dict with action taken and result.
     """
     active = _get_active_order()
+    waiting_cup = _get_waiting_for_cup_order()
 
     if active is not None:
         return {
             'action': 'none',
             'reason': f'Queue not stuck - order #{active.id} is active',
+        }
+
+    if waiting_cup is not None:
+        return {
+            'action': 'none',
+            'reason': f'Queue not stuck - order #{waiting_cup.id} is waiting for cup',
         }
 
     next_order = _get_next_queued_order()
@@ -137,10 +155,11 @@ def enqueue_order(order):
     Returns (status, message) tuple.
     """
     active = _get_active_order()
+    waiting_cup = _get_waiting_for_cup_order()
     unacked = _get_unacked_order()
     has_queued = ManualOrder.objects.filter(status='queued').exists()
 
-    if active is None and unacked is None and not has_queued:
+    if active is None and waiting_cup is None and unacked is None and not has_queued:
         return _dispatch_order(order)
     else:
         order.status = 'queued'
@@ -150,6 +169,8 @@ def enqueue_order(order):
         ).count() + 1
         if active:
             blocker = f'order #{active.id} (processing)'
+        elif waiting_cup:
+            blocker = f'order #{waiting_cup.id} (waiting for cup)'
         elif unacked:
             blocker = f'order #{unacked.id} (waiting for /complete/)'
         else:
@@ -165,18 +186,56 @@ def _dispatch_order(order):
     """
     Send an order to the robot in a background thread.
 
-    Marks the order as 'processing' and returns immediately.
-    The background thread updates the order to 'completed' or 'error'
-    when the robot finishes but does NOT auto-dispatch the next order.
+    Initially marks the order as 'waiting_for_cup'. The background thread
+    polls the cup sensor. Once verified, transitions to 'processing' and
+    sends robot commands. Updates to 'completed' or 'error' when done.
     The next order is dispatched only when the caller hits /complete/.
     """
-    order.status = 'processing'
-    order.response_message = 'Dispatched to robot'
+    order.status = 'waiting_for_cup'
+    order.response_message = 'Checking delivery cup...'
     order.save()
 
     def _run_order():
-        """Background worker: send commands to robot, update order on finish."""
+        """Background worker: poll cup, send commands to robot, update order."""
         try:
+            from .robot_control import is_demo_mode, _check_cup_with_polling
+
+            # ── Phase 1: Cup check with polling ─────────────
+            if not is_demo_mode():
+                pre = _check_cup_with_polling(order_id=order.id)
+
+                if not pre.get('cup_present'):
+                    order.refresh_from_db()
+                    order.status = 'error'
+                    order.response_message = (
+                        f"Cup not detected after timeout: "
+                        f"{pre.get('message', 'Delivery cup missing')}"
+                    )
+                    order.save()
+                    ActivityLog.objects.create(
+                        action_type='order_failed',
+                        description=(
+                            f"Order #{order.id} failed: delivery cup "
+                            f"not detected after timeout"
+                        ),
+                        user=order.created_by,
+                        metadata={
+                            'order_id': order.id,
+                            'error': 'cup_check_timeout',
+                        }
+                    )
+                    logger.error(
+                        f"Order #{order.id} failed: cup not detected"
+                    )
+                    return
+
+            # ── Phase 2: Transition to processing ───────────
+            order.refresh_from_db()
+            order.status = 'processing'
+            order.response_message = 'Cup verified, dispatching to robot'
+            order.save()
+
+            # ── Phase 3: Execute robot commands ─────────────
             success, message = send_manual_order(
                 order.doser_number,
                 order.grinder_number,
@@ -236,7 +295,7 @@ def _dispatch_order(order):
     worker = threading.Thread(target=_run_order, daemon=True)
     worker.start()
 
-    return 'processing', 'Order dispatched to robot'
+    return 'waiting_for_cup', 'Checking delivery cup'
 
 
 def complete_order(order_id):
@@ -257,6 +316,15 @@ def complete_order(order_id):
         return {'success': False, 'error': 'Order not found'}
 
     # Only allow completing orders that the robot has actually finished.
+    if order.status == 'waiting_for_cup':
+        return {
+            'success': False,
+            'error': (
+                f'Order #{order_id} is waiting for the delivery cup. '
+                f'Place the cup and wait for processing to complete.'
+            ),
+        }
+
     if order.status == 'processing':
         return {
             'success': False,
@@ -286,12 +354,19 @@ def complete_order(order_id):
         'next_order': None,
     }
 
-    # Only dispatch next if no other order is already processing.
+    # Only dispatch next if no other order is already processing or waiting.
     # This prevents two orders running simultaneously.
     already_processing = _get_active_order()
+    already_waiting = _get_waiting_for_cup_order()
     if already_processing:
         logger.info(
             f"Order #{already_processing.id} is already processing, "
+            f"not dispatching next after completing #{order.id}"
+        )
+        return result
+    if already_waiting:
+        logger.info(
+            f"Order #{already_waiting.id} is waiting for cup, "
             f"not dispatching next after completing #{order.id}"
         )
         return result

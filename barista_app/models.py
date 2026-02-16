@@ -229,6 +229,7 @@ class ManualOrder(models.Model):
     STATUS_CHOICES = [
         ('pending', 'Pending'),
         ('queued', 'Queued'),
+        ('waiting_for_cup', 'Waiting for Cup'),
         ('sent', 'Sent'),
         ('ack', 'Acknowledged'),
         ('processing', 'Processing'),

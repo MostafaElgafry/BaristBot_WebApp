@@ -544,6 +544,13 @@ class OrderCompletionAPIView(APIView):
             return Response({'error': 'Order not found'}, status=status.HTTP_404_NOT_FOUND)
 
         # Only wait for orders that are processing
+        if order.status == 'waiting_for_cup':
+            return Response({
+                'order_id': order.id,
+                'status': order.status,
+                'message': 'Order is waiting for delivery cup to be placed'
+            })
+
         if order.status != 'processing':
             return Response({
                 'order_id': order.id,

@@ -591,6 +591,63 @@ def _update_order_progress(order_id: Optional[int], message: str):
             pass  # best-effort progress update
 
 
+def _check_cup_with_polling(order_id: int = None) -> dict:
+    """
+    Poll the cup sensor until the delivery cup is detected or timeout.
+
+    If the cup is present on first check, returns immediately.
+    If missing, polls at CUP_CHECK_POLL_INTERVAL until the cup appears
+    or CUP_CHECK_TIMEOUT is exceeded.
+
+    Updates ManualOrder.response_message during polling so the frontend
+    can display progress.
+
+    Returns the check_pre_use() result dict. The caller should inspect
+    result['cup_present'] to determine success.
+    """
+    from django.conf import settings as django_settings
+
+    poll_interval = getattr(django_settings, 'CUP_CHECK_POLL_INTERVAL', 3.0)
+    timeout = getattr(django_settings, 'CUP_CHECK_TIMEOUT', 300.0)
+
+    start = time.monotonic()
+    attempt = 0
+
+    while True:
+        attempt += 1
+        pre = check_pre_use()
+
+        if pre.get('cup_present'):
+            logger.info(f"[INFO] Cup detected (attempt {attempt})")
+            _update_order_progress(
+                order_id,
+                "Delivery cup detected, preparing order..."
+            )
+            return pre
+
+        elapsed = time.monotonic() - start
+        remaining = timeout - elapsed
+
+        if remaining <= 0:
+            logger.warning(
+                f"[WARNING] Cup check timed out after {timeout}s "
+                f"({attempt} attempts)"
+            )
+            return pre
+
+        _update_order_progress(
+            order_id,
+            f"Waiting for delivery cup... "
+            f"(attempt {attempt}, ~{int(remaining)}s remaining)"
+        )
+        logger.debug(
+            f"[DEBUG] Cup not present, retry in {poll_interval}s "
+            f"(attempt {attempt}, {remaining:.0f}s left)"
+        )
+
+        time.sleep(min(poll_interval, remaining))
+
+
 def send_manual_order(doser_no: int, grinder_no: int, recipe_no: int, dose_g: int, grind_grade: int, order_id: int = None) -> tuple[bool, str]:
     """
     Send a manual order to the robot.
@@ -611,6 +668,28 @@ def send_manual_order(doser_no: int, grinder_no: int, recipe_no: int, dose_g: in
         time.sleep(0.3)
         _update_order_progress(order_id, "Step 6/6: Complete (Demo)")
         return True, "ACK (Demo Mode)"
+
+    # ── Pre-use check BEFORE sending JOB ─────────────────
+    # (Cup polling is done by the queue layer; this is a single
+    #  confirmation check right before we commit the JOB.)
+    logger.info("[INFO] Performing pre-use confirmation check...")
+    _update_order_progress(order_id, "Confirming cup and server presence...")
+    pre = check_pre_use()
+    if not pre.get("ok"):
+        logger.error(f"[ERROR] Pre-use check failed: {pre.get('message')}")
+        return False, f"Pre-use check failed: {pre.get('message')}"
+
+    # Select first available server
+    servers = pre.get("servers", [False, False, False, False])
+    server_no = None
+    for idx, available in enumerate(servers, start=1):
+        if available:
+            server_no = idx
+            break
+    if server_no is None:
+        logger.error("[ERROR] No coffee server available")
+        return False, "No coffee server available"
+    logger.info(f"[INFO] Selected coffee server S{server_no}")
 
     # Ensure TCP server is listening BEFORE we send the JOB command.
     # The cobot connects immediately after receiving a JOB, so the
@@ -642,32 +721,12 @@ def send_manual_order(doser_no: int, grinder_no: int, recipe_no: int, dose_g: in
             return False, f"Robot not connected: {e}"
 
     try:
+        # ── Send JOB command (cup already verified) ───────
         logger.debug(f"[DEBUG] Sending job to robot...")
         result = client.send_job(dose_g, grind_grade, doser_no, recipe_no)
         logger.info(f"[SUCCESS] Order sent successfully (serial): {result}")
 
-        # Perform pre-use check to determine available coffee server
-        logger.info("[INFO] Checking for available coffee server...")
-        pre = check_pre_use()
-        if not pre.get("ok"):
-            logger.error(f"[ERROR] Pre-use check failed: {pre.get('message')}")
-            return False, f"Pre-use check failed: {pre.get('message')}"
-
-        # Select first available server
-        servers = pre.get("servers", [False, False, False, False])
-        server_no = None
-        for idx, available in enumerate(servers, start=1):
-            if available:
-                server_no = idx
-                break
-
-        if server_no is None:
-            logger.error("[ERROR] No coffee server available")
-            return False, "No coffee server available"
-
-        logger.info(f"[INFO] Selected coffee server S{server_no}")
-
-        # Now send commands to the cobot over Ethernet socket
+        # Send commands to the cobot over Ethernet socket
         logger.info("[INFO] Sending the robot commands over ethernet socket")
         ok, msg = send_tcp_command_to_cobot(doser_no, grinder_no, recipe_no, server_no, order_id=order_id)
         if ok:

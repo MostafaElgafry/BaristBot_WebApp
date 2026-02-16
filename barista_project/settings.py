@@ -131,6 +131,11 @@ ROBOT_BAUDRATE = int(os.environ.get('ROBOT_BAUDRATE', 115200))
 # Set environment variable ROBOT_DEMO_MODE=true to enable demo/simulation mode
 ROBOT_DEMO_MODE = os.environ.get('ROBOT_DEMO_MODE', 'false').lower() == 'true'
 
+# Cup check polling interval in seconds (how often to re-check when cup is missing)
+CUP_CHECK_POLL_INTERVAL = float(os.environ.get('CUP_CHECK_POLL_INTERVAL', '3.0'))
+# Maximum time in seconds to wait for cup before failing the order
+CUP_CHECK_TIMEOUT = float(os.environ.get('CUP_CHECK_TIMEOUT', '300.0'))
+
 # Machine API Key for machine-to-machine authentication
 # Set via environment variable in production
 MACHINE_API_KEY = os.environ.get('MACHINE_API_KEY', 'egyrobot8000')
