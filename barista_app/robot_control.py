@@ -591,63 +591,6 @@ def _update_order_progress(order_id: Optional[int], message: str):
             pass  # best-effort progress update
 
 
-def _check_cup_with_polling(order_id: int = None) -> dict:
-    """
-    Poll the cup sensor until the delivery cup is detected or timeout.
-
-    If the cup is present on first check, returns immediately.
-    If missing, polls at CUP_CHECK_POLL_INTERVAL until the cup appears
-    or CUP_CHECK_TIMEOUT is exceeded.
-
-    Updates ManualOrder.response_message during polling so the frontend
-    can display progress.
-
-    Returns the check_pre_use() result dict. The caller should inspect
-    result['cup_present'] to determine success.
-    """
-    from django.conf import settings as django_settings
-
-    poll_interval = getattr(django_settings, 'CUP_CHECK_POLL_INTERVAL', 3.0)
-    timeout = getattr(django_settings, 'CUP_CHECK_TIMEOUT', 300.0)
-
-    start = time.monotonic()
-    attempt = 0
-
-    while True:
-        attempt += 1
-        pre = check_pre_use()
-
-        if pre.get('cup_present'):
-            logger.info(f"[INFO] Cup detected (attempt {attempt})")
-            _update_order_progress(
-                order_id,
-                "Delivery cup detected, preparing order..."
-            )
-            return pre
-
-        elapsed = time.monotonic() - start
-        remaining = timeout - elapsed
-
-        if remaining <= 0:
-            logger.warning(
-                f"[WARNING] Cup check timed out after {timeout}s "
-                f"({attempt} attempts)"
-            )
-            return pre
-
-        _update_order_progress(
-            order_id,
-            f"Waiting for delivery cup... "
-            f"(attempt {attempt}, ~{int(remaining)}s remaining)"
-        )
-        logger.debug(
-            f"[DEBUG] Cup not present, retry in {poll_interval}s "
-            f"(attempt {attempt}, {remaining:.0f}s left)"
-        )
-
-        time.sleep(min(poll_interval, remaining))
-
-
 def send_manual_order(doser_no: int, grinder_no: int, recipe_no: int, dose_g: int, grind_grade: int, order_id: int = None) -> tuple[bool, str]:
     """
     Send a manual order to the robot.

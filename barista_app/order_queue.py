@@ -184,58 +184,131 @@ def enqueue_order(order):
 
 def _dispatch_order(order):
     """
-    Send an order to the robot in a background thread.
+    Check the delivery cup and send an order to the robot.
 
-    Initially marks the order as 'waiting_for_cup'. The background thread
-    polls the cup sensor. Once verified, transitions to 'processing' and
-    sends robot commands. Updates to 'completed' or 'error' when done.
-    The next order is dispatched only when the caller hits /complete/.
+    Checks the cup sensor once. If present, spawns a background thread
+    to execute robot commands immediately. If missing, sets the order to
+    'waiting_for_cup' and starts a non-blocking periodic timer that
+    re-checks every CUP_CHECK_POLL_INTERVAL seconds. No thread is held
+    hostage — the timer fires, checks, and either starts the order or
+    reschedules itself.
     """
+    from .robot_control import check_pre_use, is_demo_mode
+
+    # In demo mode, skip cup check entirely
+    if is_demo_mode():
+        order.status = 'processing'
+        order.response_message = 'Dispatched to robot (Demo)'
+        order.save()
+        _start_order_worker(order)
+        return 'processing', 'Order dispatched to robot'
+
+    # Check cup once right now
+    pre = check_pre_use()
+    if pre.get('cup_present'):
+        # Cup is present — dispatch immediately
+        order.status = 'processing'
+        order.response_message = 'Cup verified, dispatching to robot'
+        order.save()
+        _start_order_worker(order)
+        return 'processing', 'Order dispatched to robot'
+
+    # Cup is missing — set waiting status and start periodic timer
     order.status = 'waiting_for_cup'
-    order.response_message = 'Checking delivery cup...'
+    order.response_message = 'Waiting for delivery cup...'
     order.save()
+    logger.info(f"Order #{order.id}: cup not present, starting periodic check")
 
-    def _run_order():
-        """Background worker: poll cup, send commands to robot, update order."""
+    _start_cup_check_timer(order.id)
+
+    return 'waiting_for_cup', 'Waiting for delivery cup'
+
+
+def _start_cup_check_timer(order_id, attempt=0):
+    """
+    Schedule a non-blocking timer to re-check the cup sensor.
+
+    Uses threading.Timer so no thread is blocked between checks.
+    When the cup is detected, transitions the order to 'processing'
+    and starts the robot worker. On timeout, sets the order to 'error'.
+    """
+    from django.conf import settings as django_settings
+    from .robot_control import check_pre_use, _update_order_progress
+
+    poll_interval = getattr(django_settings, 'CUP_CHECK_POLL_INTERVAL', 3.0)
+    timeout = getattr(django_settings, 'CUP_CHECK_TIMEOUT', 300.0)
+
+    def _check():
+        nonlocal attempt
+        attempt += 1
+
         try:
-            from .robot_control import is_demo_mode, _check_cup_with_polling
+            order = ManualOrder.objects.get(id=order_id)
+        except ManualOrder.DoesNotExist:
+            logger.warning(f"Cup check timer: order #{order_id} not found, stopping")
+            return
 
-            # ── Phase 1: Cup check with polling ─────────────
-            if not is_demo_mode():
-                pre = _check_cup_with_polling(order_id=order.id)
+        # If order was cancelled or changed externally, stop checking
+        if order.status != 'waiting_for_cup':
+            logger.info(
+                f"Cup check timer: order #{order_id} status is "
+                f"'{order.status}', stopping"
+            )
+            return
 
-                if not pre.get('cup_present'):
-                    order.refresh_from_db()
-                    order.status = 'error'
-                    order.response_message = (
-                        f"Cup not detected after timeout: "
-                        f"{pre.get('message', 'Delivery cup missing')}"
-                    )
-                    order.save()
-                    ActivityLog.objects.create(
-                        action_type='order_failed',
-                        description=(
-                            f"Order #{order.id} failed: delivery cup "
-                            f"not detected after timeout"
-                        ),
-                        user=order.created_by,
-                        metadata={
-                            'order_id': order.id,
-                            'error': 'cup_check_timeout',
-                        }
-                    )
-                    logger.error(
-                        f"Order #{order.id} failed: cup not detected"
-                    )
-                    return
+        # Check timeout
+        elapsed = attempt * poll_interval
+        if elapsed >= timeout:
+            order.status = 'error'
+            order.response_message = 'Cup not detected after timeout'
+            order.save()
+            ActivityLog.objects.create(
+                action_type='order_failed',
+                description=f"Order #{order.id} failed: cup not detected after {timeout}s",
+                user=order.created_by,
+                metadata={'order_id': order.id, 'error': 'cup_check_timeout'}
+            )
+            logger.error(f"Order #{order.id}: cup check timed out after {timeout}s")
+            return
 
-            # ── Phase 2: Transition to processing ───────────
-            order.refresh_from_db()
+        pre = check_pre_use()
+
+        if pre.get('cup_present'):
+            # Cup detected — transition to processing
+            logger.info(f"Order #{order.id}: cup detected (attempt {attempt})")
             order.status = 'processing'
             order.response_message = 'Cup verified, dispatching to robot'
             order.save()
+            _start_order_worker(order)
+        else:
+            # Still missing — update progress and reschedule
+            remaining = int(timeout - elapsed)
+            _update_order_progress(
+                order_id,
+                f"Waiting for delivery cup... "
+                f"(attempt {attempt}, ~{remaining}s remaining)"
+            )
+            logger.debug(
+                f"Order #{order_id}: cup not present, "
+                f"next check in {poll_interval}s (attempt {attempt})"
+            )
+            _start_cup_check_timer(order_id, attempt)
 
-            # ── Phase 3: Execute robot commands ─────────────
+    timer = threading.Timer(poll_interval, _check)
+    timer.daemon = True
+    timer.start()
+
+
+def _start_order_worker(order):
+    """
+    Spawn a background thread to execute robot commands for an order.
+
+    The order must already be in 'processing' status.
+    Updates the order to 'completed' or 'error' when done.
+    Does NOT auto-dispatch the next order — caller must hit /complete/.
+    """
+    def _run_order():
+        try:
             success, message = send_manual_order(
                 order.doser_number,
                 order.grinder_number,
@@ -245,7 +318,6 @@ def _dispatch_order(order):
                 order_id=order.id,
             )
 
-            # Refresh from DB in case it was modified
             order.refresh_from_db()
 
             if success:
@@ -267,8 +339,6 @@ def _dispatch_order(order):
                     }
                 )
                 logger.info(f"Order #{order.id} completed: {message}")
-                # Do NOT dispatch next order here.
-                # The caller must hit /complete/ to advance the queue.
             else:
                 order.status = 'error'
                 order.response_message = message
@@ -280,8 +350,6 @@ def _dispatch_order(order):
                     metadata={'order_id': order.id, 'error': message}
                 )
                 logger.error(f"Order #{order.id} failed: {message}")
-                # Do NOT dispatch next order here.
-                # The caller must hit /complete/ to advance the queue.
         except Exception as e:
             logger.exception(f"[ERROR] Background order #{order.id} crashed: {e}")
             try:
@@ -294,8 +362,6 @@ def _dispatch_order(order):
 
     worker = threading.Thread(target=_run_order, daemon=True)
     worker.start()
-
-    return 'waiting_for_cup', 'Checking delivery cup'
 
 
 def complete_order(order_id):
