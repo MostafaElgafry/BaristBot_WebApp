@@ -612,28 +612,6 @@ def send_manual_order(doser_no: int, grinder_no: int, recipe_no: int, dose_g: in
         _update_order_progress(order_id, "Step 6/6: Complete (Demo)")
         return True, "ACK (Demo Mode)"
 
-    # ── Pre-use check BEFORE sending JOB ─────────────────
-    # (Cup polling is done by the queue layer; this is a single
-    #  confirmation check right before we commit the JOB.)
-    logger.info("[INFO] Performing pre-use confirmation check...")
-    _update_order_progress(order_id, "Confirming cup and server presence...")
-    pre = check_pre_use()
-    if not pre.get("ok"):
-        logger.error(f"[ERROR] Pre-use check failed: {pre.get('message')}")
-        return False, f"Pre-use check failed: {pre.get('message')}"
-
-    # Select first available server
-    servers = pre.get("servers", [False, False, False, False])
-    server_no = None
-    for idx, available in enumerate(servers, start=1):
-        if available:
-            server_no = idx
-            break
-    if server_no is None:
-        logger.error("[ERROR] No coffee server available")
-        return False, "No coffee server available"
-    logger.info(f"[INFO] Selected coffee server S{server_no}")
-
     # Ensure TCP server is listening BEFORE we send the JOB command.
     # The cobot connects immediately after receiving a JOB, so the
     # server must already be accepting connections.
@@ -664,24 +642,32 @@ def send_manual_order(doser_no: int, grinder_no: int, recipe_no: int, dose_g: in
             return False, f"Robot not connected: {e}"
 
     try:
-        # ── Close stale cobot connection before JOB ───────
-        # The cobot opens a fresh TCP connection after each JOB command.
-        # Clear the old connection so _get_cobot_connection() goes
-        # straight to accept() instead of wasting time on a dead reuse.
-        global _cobot_conn
-        with _cobot_tcp_lock:
-            if _cobot_conn is not None:
-                logger.info("[INFO] Closing stale cobot connection before new JOB")
-                try:
-                    _cobot_conn.close()
-                except Exception:
-                    pass
-                _cobot_conn = None
-
-        # ── Send JOB command (cup already verified) ───────
+        # ── Send JOB command (cup already verified by queue layer) ───
         logger.debug(f"[DEBUG] Sending job to robot...")
         result = client.send_job(dose_g, grind_grade, doser_no, recipe_no)
         logger.info(f"[SUCCESS] Order sent successfully (serial): {result}")
+
+        # ── Pre-use check AFTER JOB to determine server number ───
+        # This also provides the necessary delay for the cobot to
+        # establish its TCP connection after receiving the JOB command.
+        # Cup gating is already handled by the queue layer.
+        logger.info("[INFO] Checking for available coffee server...")
+        pre = check_pre_use()
+        if not pre.get("ok"):
+            logger.error(f"[ERROR] Pre-use check failed: {pre.get('message')}")
+            return False, f"Pre-use check failed: {pre.get('message')}"
+
+        # Select first available server
+        servers = pre.get("servers", [False, False, False, False])
+        server_no = None
+        for idx, available in enumerate(servers, start=1):
+            if available:
+                server_no = idx
+                break
+        if server_no is None:
+            logger.error("[ERROR] No coffee server available")
+            return False, "No coffee server available"
+        logger.info(f"[INFO] Selected coffee server S{server_no}")
 
         # Send commands to the cobot over Ethernet socket
         logger.info("[INFO] Sending the robot commands over ethernet socket")
